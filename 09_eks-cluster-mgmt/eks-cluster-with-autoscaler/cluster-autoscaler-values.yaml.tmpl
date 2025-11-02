@@ -1,0 +1,45 @@
+autoDiscovery:
+  clusterName: "${cluster_name}" # EKS 클러스터 이름
+
+awsRegion: "${aws_region}"
+
+rbac:
+  serviceAccount:
+    create: false
+    name: cluster-autoscaler
+
+# 매개변수와 기본값
+# https://github.com/kubernetes/autoscaler/blob/master/charts/cluster-autoscaler/values.yaml
+extraArgs:
+  logtostderr: true               # 로그를 표준 오류(stderr)로 출력하도록 설정. true로 설정 시 모든 로그가 stderr로 출력됨.
+  stderrthreshold: info           # 로그를 표준 오류로 출력하는 임계값을 설정. 'info' 수준 이상의 로그가 stderr로 출력됨.
+  v: 4                            # 로그 수준의 상세도를 설정. 숫자가 클수록 더 자세한 디버깅 로그가 출력되며, 여기서는 4로 설정되어 있음.
+  
+  write-status-configmap: true   # Cluster Autoscaler의 상태를 ConfigMap에 기록할지 여부를 설정. true로 설정 시 상태 정보가 ConfigMap에 기록됨.
+  status-config-map-name: cluster-autoscaler-status  # 상태 정보를 기록할 ConfigMap의 이름을 지정. 'cluster-autoscaler-status'라는 ConfigMap에 상태 정보가 저장됨.
+  # leader-elect: true             # 리더 선출을 활성화. true로 설정 시 고가용성을 위해 여러 인스턴스 중 하나를 리더로 선출하여 실행함.
+  # leader-elect-resource-lock: endpoints  # 리더 선출을 위한 리소스 잠금 방식. 'endpoints'는 리더 선출에 쿠버네티스 엔드포인트 리소스를 사용함.
+  
+  skip-nodes-with-local-storage: true  # 로컬 스토리지를 사용하는 노드를 축소하지 않도록 설정. 데이터 손실을 방지하기 위해 로컬 스토리지가 있는 노드는 축소하지 않음.
+  expander: random               # 노드 확장을 위해 선택할 Auto Scaling 그룹을 랜덤으로 선택. 노드 확장 시 우선순위를 두지 않고 무작위로 그룹을 선택함.
+  
+  scale-down-enabled: true       # 노드 축소를 활성화. true로 설정하면 사용되지 않는 노드를 자동으로 제거함.
+  balance-similar-node-groups: true  # 유사한 노드 그룹 간의 리소스 균형을 맞추도록 설정. true로 설정 시 비슷한 설정의 노드 그룹 간에 리소스를 균등하게 분배함.
+  min-replica-count: 0           # 자동 확장/축소에서 허용할 최소 복제본 수를 설정. 여기서는 최소 복제본 수가 0으로 설정됨.
+  
+  scale-down-utilization-threshold: 0.5  # 노드 리소스 사용률이 이 값보다 낮을 경우 노드를 축소할 수 있음. 50% 미만일 경우 축소 가능.
+  scale-down-non-empty-candidates-count: 30  # 축소할 수 있는 노드 중, 최소 30개의 노드를 비우기 위한 후보로 고려함.
+  
+  max-node-provision-time: 15m0s  # 새로운 노드를 프로비저닝할 때 최대 대기 시간. 15분을 초과하면 프로비저닝 실패로 간주.
+  scan-interval: 10s              # Cluster Autoscaler가 클러스터 상태를 확인하는 주기. 10초마다 상태를 스캔함.
+  
+  scale-down-delay-after-add: 5m  # 새 노드가 추가된 후 해당 시간 동안은 해당 노드를 축소하지 않음.
+  scale-down-delay-after-delete: 0s  # 노드가 삭제된 후 즉시 축소를 재개함.
+  scale-down-delay-after-failure: 3m  # 축소 시도가 실패한 후 3분 동안 축소를 다시 시도하지 않음.
+  scale-down-unneeded-time: 5m     # 노드가 불필요(unneeded) 상태로 감지된 후 해당 시간 동안 축소를 대기함.
+  
+  skip-nodes-with-system-pods: true  # 시스템 파드(예: kube-system 네임스페이스에서 실행 중인 파드)가 있는 노드를 축소하지 않도록 설정.
+  
+  balancing-ignore-label_1: first-label-to-ignore  # 노드 균형 조정에서 무시할 첫 번째 라벨을 지정. 이 라벨을 가진 노드는 균형 조정에서 제외됨.
+  balancing-ignore-label_2: second-label-to-ignore # 노드 균형 조정에서 무시할 두 번째 라벨을 지정.
+

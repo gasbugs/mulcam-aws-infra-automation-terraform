@@ -1,0 +1,6 @@
+server:
+  service:
+    type: LoadBalancer
+
+controller:
+  replicaCount: 2

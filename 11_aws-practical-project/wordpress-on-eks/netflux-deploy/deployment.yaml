@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netflux
+  namespace: netflux
+  labels:
+    app: netflux
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: netflux
+  template:
+    metadata:
+      labels:
+        app: netflux
+    spec:
+      serviceAccountName: netflux-sa  # 여기에 서비스 계정 이름을 지정합니다
+      containers:
+      - name: netflux
+        image: 445567110488.dkr.ecr.us-east-1.amazonaws.com/netflux:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: DYNAMODB_TABLE
+          value: "Movies"
+        - name: AWS_REGION
+          value: "us-east-1"

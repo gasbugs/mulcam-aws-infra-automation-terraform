@@ -1,0 +1,29 @@
+apiVersion: karpenter.sh/v1  # Karpenter API 버전
+kind: NodePool               # Karpenter에서 관리할 노드 풀(NodePool)을 정의
+metadata:
+  name: default              # NodePool의 이름을 "default"로 설정
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws  # API 그룹, Karpenter의 EC2NodeClass 리소스를 참조
+        kind: EC2NodeClass        # EC2 인스턴스에 대한 속성을 정의하는 EC2NodeClass
+        name: default             # NodePool이 참조할 EC2NodeClass 이름 ("default")
+      requirements:               # 인스턴스 선택 기준을 정의
+        - key: "karpenter.k8s.aws/instance-category"
+          operator: In
+          values: ["c", "m", "r"] # "c", "m", "r" 카테고리의 인스턴스만 선택 (컴퓨팅 최적화, 범용, 메모리 최적화)
+        - key: "karpenter.k8s.aws/instance-cpu"
+          operator: In
+          values: ["2", "4", "8", "16", "32"]  # 2, 4, 8, 16, 32 vCPU를 가진 인스턴스만 선택
+        - key: "karpenter.k8s.aws/instance-hypervisor"
+          operator: In
+          values: ["nitro"]  # Nitro 하이퍼바이저를 사용하는 인스턴스만 선택
+        - key: "karpenter.k8s.aws/instance-generation"
+          operator: Gt
+          values: ["2"]      # 2세대보다 높은 인스턴스만 선택 (예: m5, c5, r5)
+  limits:
+    cpu: 1000                # NodePool에서 사용할 총 CPU 용량을 1000 vCPU로 제한
+  disruption:
+    consolidationPolicy: WhenEmpty  # 노드가 비어 있을 때만 통합 작업을 수행하여 노드를 종료
+    consolidateAfter: 30s           # 노드가 비어 있는 상태에서 30초 후에 통합 작업을 시작 (즉, 사용하지 않는 노드를 제거)

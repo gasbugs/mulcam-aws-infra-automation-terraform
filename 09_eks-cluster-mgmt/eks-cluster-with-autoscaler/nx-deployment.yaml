@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nx
+  labels:
+    app: nx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nx
+  template:
+    metadata:
+      labels:
+        app: nx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "250m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"

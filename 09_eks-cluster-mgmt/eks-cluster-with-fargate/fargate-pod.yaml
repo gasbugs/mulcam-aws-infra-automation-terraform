@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fargate-pod
+  namespace: fargate-namespace
+  labels:
+    fargate_label: "fargate-profile-a"
+spec:
+  containers:
+    - name: fargate-container
+      image: nginx
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "1Gi" # +256MB -> 2Gi
+          cpu: "500m" 
+              

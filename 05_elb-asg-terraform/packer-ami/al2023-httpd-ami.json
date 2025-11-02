@@ -1,0 +1,36 @@
+{
+  "variables": {
+    "aws_region": "us-east-1",
+    "instance_type": "t2.micro",
+    "profile": "my-profile"
+  },
+  "builders": [
+    {
+      "type": "amazon-ebs",
+      "profile": "{{user `profile`}}",
+      "region": "{{user `aws_region`}}",
+      "instance_type": "{{user `instance_type`}}",
+      "ssh_username": "ec2-user",
+      "ami_name": "packer-amazon-linux-2023-{{timestamp}}",
+      "source_ami_filter": {
+        "filters": {
+          "name": "al2023-ami-*-kernel-6.1-x86_64",
+          "root-device-type": "ebs",
+          "virtualization-type": "hvm"
+        },
+        "owners": ["amazon"],
+        "most_recent": true
+      }
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "inline": [
+        "sudo yum update -y",
+        "sudo yum install httpd -y",
+        "sudo systemctl enable httpd --now"
+      ]
+    }
+  ]
+}

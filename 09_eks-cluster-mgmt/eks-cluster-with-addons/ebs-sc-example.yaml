@@ -1,0 +1,41 @@
+# EBS를 사용하는 StorageClass (AWS EBS CSI 드라이버 사용)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ebs-csi-sc
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp2
+  fsType: ext4
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+---
+# EBS를 사용하는 PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ebs-csi-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ebs-csi-sc
+  resources:
+    requests:
+      storage: 10Gi
+---
+# EBS를 사용하는 파드 구성
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ebs-csi-pod
+spec:
+  containers:
+    - name: app-container
+      image: nginx
+      volumeMounts:
+        - mountPath: /usr/share/nginx/html
+          name: ebs-storage
+  volumes:
+    - name: ebs-storage
+      persistentVolumeClaim:
+        claimName: ebs-csi-pvc
