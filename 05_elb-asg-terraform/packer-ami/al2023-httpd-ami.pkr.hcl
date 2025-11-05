@@ -51,6 +51,7 @@ source "amazon-ebs" "example" {
   ssh_username  = "ec2-user"        # EC2 인스턴스 SSH 접속용 사용자
   ami_name      = "packer-amazon-linux-2023-${local.timestamp}" # 생성할 AMI의 이름, 타임스탬프를 포함
   source_ami    = data.amazon-ami.al2023.id    # 소스로 사용할 AMI ID
+  ssh_interface = "public_dns"
 }
 
 # 빌드 블록: AMI 생성 시 수행할 작업 정의
