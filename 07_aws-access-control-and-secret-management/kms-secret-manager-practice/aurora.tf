@@ -117,23 +117,39 @@ resource "aws_kms_key" "example_key" {
     Id      = "kms-key-policy",
     Statement = [
       {
-        Sid : "Enable IAM User Permissions",
-        Effect : "Allow",
-        Principal : {
-          "AWS" : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/user0"
+        Sid       = "Enable IAM User Permissions",
+        Effect    = "Allow",
+        Principal = {
+          "AWS" = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
         },
-        Action : "kms:*",
-        Resource : "*"
+        Action    = "kms:*",
+        Resource  = "*"
       },
       {
         Sid    = "Allow use of the key by EC2 role",
         Effect = "Allow",
         Principal = {
-          AWS = aws_iam_role.ec2_secrets_manager_role.arn
+          "AWS" = aws_iam_role.ec2_secrets_manager_role.arn
         },
         Action = [
           "kms:Decrypt",
           "kms:GenerateDataKey"
+        ],
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow Secrets Manager to use the key",
+        Effect = "Allow",
+        Principal = {
+          "Service" = "secretsmanager.amazonaws.com"
+        },
+        Action = [
+          "kms:CreateGrant",
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*",
+          "kms:ReEncrypt*"
         ],
         Resource = "*"
       }
