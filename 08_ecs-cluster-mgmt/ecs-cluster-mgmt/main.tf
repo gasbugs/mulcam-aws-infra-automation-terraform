@@ -74,8 +74,8 @@ resource "aws_ecs_task_definition" "ecs_task" {
       "essential": true,
       "portMappings": [
         {
-          "containerPort": 8080,
-          "hostPort": 8080  
+          "containerPort": 80,
+          "hostPort": 80  
         }
       ]
     }
@@ -103,7 +103,7 @@ resource "aws_ecs_service" "ecs_service" {
   load_balancer {
     target_group_arn = aws_lb_target_group.ecs_tg.arn # 타겟 그룹 참조
     container_name   = "my-container"                 # 컨테이너 이름
-    container_port   = 8080                           # 컨테이너 포트 설정
+    container_port   = 80                             # 컨테이너 포트 설정
   }
 
   depends_on = [aws_lb_listener.http_listener] # ALB 리스너가 먼저 생성되어야 함
@@ -172,14 +172,14 @@ resource "aws_security_group" "alb_sg" {
   }
 }
 
-# ECS 보안 그룹 (8080번 포트로 접근 허용)
+# ECS 보안 그룹 (80번 포트로 접근 허용)
 resource "aws_security_group" "ecs_sg" {
   name   = "ecs-sg"          # 보안 그룹 이름
   vpc_id = module.vpc.vpc_id # VPC 참조
 
   ingress {
-    from_port   = 8080 # 8080번 포트로 접근 허용
-    to_port     = 8080
+    from_port   = 80 # 80번 포트로 접근 허용
+    to_port     = 80
     protocol    = "tcp"           # TCP 프로토콜 사용
     cidr_blocks = ["10.0.0.0/16"] # VPC 내부 IP 대역 허용
   }
