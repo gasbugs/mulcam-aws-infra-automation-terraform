@@ -1,10 +1,10 @@
 # Create an ECR Repository
 resource "aws_ecr_repository" "my_ecr_repo" {
   name                 = "my-ecr-repo"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "MUTABLE" # 태그(버전)명 변경 
 
   image_scanning_configuration {
-    scan_on_push = true
+    scan_on_push = true # 이미지가 업로드되었을 때 스캔 수행
   }
 
   tags = {

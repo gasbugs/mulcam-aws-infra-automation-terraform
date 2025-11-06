@@ -13,5 +13,5 @@ variable "docker_hub_password" {
 }
 
 variable "key_path" {
-  default = "C:/users/isc03/.ssh/my-key.pub"
+  default = "~/.ssh/my-key.pub"
 }
