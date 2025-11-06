@@ -49,16 +49,16 @@ module "vpc" {
 # EKS 클러스터 생성 모듈을 정의
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "20.26.0"
+  version = "21.8.0"
 
-  cluster_name    = local.cluster_name
-  cluster_version = "1.33"
+  name               = local.cluster_name
+  kubernetes_version = "1.34"
 
-  cluster_endpoint_public_access           = true
+  endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
 
   # 클러스터에 설치할 Addons 목록 및 IRSA 구성, overwrite 정책 적용
-  cluster_addons = {
+  addons = {
     # Amazon VPC CNI
     vpc-cni = {
       #version                  = "v1.12.7"
@@ -94,22 +94,24 @@ module "eks" {
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
-
-  eks_managed_node_group_defaults = {
-    ami_type = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
-  }
-
-  eks_managed_node_groups = {
-    one = {
-      name           = "node-group-1"
-      instance_types = ["t3.small"]
-
-      min_size     = 1
-      max_size     = 3
-      desired_size = 2
-    }
-  }
 }
+
+module "eks_managed_node_groups" {
+  source  = "terraform-aws-modules/eks/aws//modules/eks-managed-node-group" # EKS 관리형 노드 그룹 모듈 경로
+  version = "21.8"                                                          # 모듈 버전
+
+  name                 = "on_demand"                     # 첫 번째 노드 그룹 이름
+  cluster_name         = module.eks.cluster_name         # EKS 클러스터 이름
+  cluster_service_cidr = module.eks.cluster_service_cidr # 클러스터 서비스 CIDR
+  subnet_ids           = module.vpc.private_subnets      # 사설 서브넷 ID
+
+  ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
+  instance_types = ["c5.large"]             # 노드 인스턴스 유형
+  min_size       = 1                        # 최소 노드 수
+  max_size       = 3                        # 최대 노드 수
+  desired_size   = 2                        # 원하는 노드 수
+}
+
 
 # IRSA 모듈 정의 (EBS CSI 드라이버)
 module "irsa-ebs-csi" {
@@ -197,4 +199,3 @@ resource "aws_efs_mount_target" "example" {
 
   depends_on = [module.vpc.private_subnets]
 }
-
