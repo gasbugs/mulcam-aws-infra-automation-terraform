@@ -119,22 +119,25 @@ module "eks" {
       ipv6_cidr_blocks = ["::/0"]
     }
   }
-
-  # EKS 관리형 노드 그룹 정의
-  eks_managed_node_groups = {
-    one = {
-      name           = "node-group-1"           # 첫 번째 노드 그룹 이름
-      ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
-      instance_types = ["t3.small"]             # 노드 인스턴스 유형 (2 CPU, 4 MEM)
-
-      min_size     = 1 # 최소 노드 수
-      max_size     = 3 # 최대 노드 수
-      desired_size = 2 # 원하는 노드 수
-
-      //node_role_arn = aws_iam_role.eks_node_role.arn
-    }
-  }
 }
+
+module "eks_managed_node_groups" {
+  source  = "terraform-aws-modules/eks/aws//modules/eks-managed-node-group" # EKS 관리형 노드 그룹 모듈 경로
+  version = "21.8"                                                          # 모듈 버전
+
+  name                 = "on_demand"                     # 첫 번째 노드 그룹 이름
+  cluster_name         = module.eks.cluster_name         # EKS 클러스터 이름
+  cluster_service_cidr = module.eks.cluster_service_cidr # 클러스터 서비스 CIDR
+  subnet_ids           = module.vpc.private_subnets      # 사설 서브넷 ID
+
+  ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
+  instance_types = ["c5.large"]             # 노드 인스턴스 유형
+  min_size       = 1                        # 최소 노드 수
+  max_size       = 3                        # 최대 노드 수
+  desired_size   = 2                        # 원하는 노드 수
+}
+
+
 
 /*
 # 노드 그룹을 위한 IAM 역할
