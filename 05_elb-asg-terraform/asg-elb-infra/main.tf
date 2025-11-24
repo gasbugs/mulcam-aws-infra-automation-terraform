@@ -18,10 +18,10 @@ module "vpc" {
 
   # VPC 이름 및 CIDR 범위 설정
   name                 = "example-vpc"
-  cidr                 = "10.0.0.0/16"
+  cidr                 = var.vpc_cidr
   azs                  = ["${var.aws_region}a", "${var.aws_region}b"] # 가용 영역 설정
-  public_subnets       = ["10.0.1.0/24", "10.0.2.0/24"]               # 퍼블릭 서브넷 CIDR
-  private_subnets      = ["10.0.3.0/24", "10.0.4.0/24"]               # 프라이빗 서브넷 CIDR
+  public_subnets       = var.public_subnets                           # 퍼블릭 서브넷 CIDR
+  private_subnets      = var.private_subnets                          # 프라이빗 서브넷 CIDR
   enable_dns_hostnames = true                                         # DNS 호스트 이름 활성화
   enable_dns_support   = true                                         # DNS 지원 활성화
 
@@ -60,15 +60,7 @@ data "aws_ami" "al2023" {
 }
 
 # 부트스트랩 스크립트를 base64로 인코딩하여 로컬 변수에 저장
-locals {
-  bootstrap_script = base64encode(<<-EOT
-    #!/bin/bash
-    yum install -y nginx # nginx 설치
-    systemctl start nginx # nginx 시작
-    echo "Hello, Nginx! $(hostname)" > /usr/share/nginx/html/index.html # 인덱스 페이지 생성
-  EOT
-  )
-}
+
 
 # Launch Template을 정의하여 인스턴스 시작 템플릿 설정
 resource "aws_launch_template" "example" {
@@ -76,7 +68,7 @@ resource "aws_launch_template" "example" {
   image_id      = data.aws_ami.al2023.id # 위에서 가져온 AMI ID 사용
   instance_type = var.instance_type      # 인스턴스 유형 변수 사용
 
-  user_data = local.bootstrap_script # 부트스트랩 스크립트 사용
+  user_data = filebase64("${path.module}/user_data.sh") # 부트스트랩 스크립트 사용
 
   key_name = aws_key_pair.example.key_name # 생성된 키 페어 이름 설정
 
