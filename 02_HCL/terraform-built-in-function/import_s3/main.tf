@@ -4,7 +4,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws" # AWS 프로바이더의 소스를 HashiCorp 레지스트리로 지정
-      version = ">= 6.19.0"     # AWS 프로바이더의 최소 버전을 6.19.0 이상으로 설정
+      version = "~> 6.0"        # AWS 프로바이더의 최소 버전을 6.19.0 이상으로 설정
     }
   }
 }
