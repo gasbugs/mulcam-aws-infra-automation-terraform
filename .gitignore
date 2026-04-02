@@ -38,3 +38,4 @@ terraform.rc
 
 # Ignore sensitive files
 accesskey.txt
+workshop-credentials-*.csv

@@ -77,9 +77,16 @@ Directories with `_pending` suffix in `09_eks-cluster-mgmt/` are under review du
 - `eks-cluster-with-karpenter_pending/`
 - `eks-cluster-with-spot-node-group_pending/`
 
-## Helper Script
+## Workshop Management Scripts
 
-`aws-resource.py` scans 27 AWS resource types (EC2, VPC, EBS, ELB, EKS, Lambda, RDS, DynamoDB, ECR, KMS, Secrets Manager, etc.) across multiple accounts for inventory and cleanup. It requires an `accesskey.txt` file (tab-separated `access_key` and `secret_key` pairs, one account per line) in the working directory. Uses multi-threaded scanning (max 30 workers) and outputs a list of discovered non-default resources.
+All scripts read `accesskey.txt` (tab-separated `access_key` and `secret_key`, one account per line) from the working directory and process accounts in parallel.
+
+| 파일 | 용도 |
+|---|---|
+| `aws-resource-audit.py` | 잔여 리소스 감사 — 27개 서비스 유형 스캔, [비용주의] 리소스 강조 표시 |
+| `aws-workshop-setup.py` | 수강생 계정 셋업 — 정책 생성·사용자 생성·콘솔 접근 설정·CSV 출력 |
+| `aws-workshop-teardown.py` | 수강생 IAM 사용자(`terraform-user-1`) 완전 삭제 |
+| `aws-daily-cost-report.py` | 전일 비용 리포트 — Cost Explorer로 서비스별 비용 조회 |
 
 ## Workshop IAM Policy
 
