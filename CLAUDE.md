@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Purpose
 
-A structured learning repository for AWS infrastructure automation with Terraform, organized as 11 progressive modules (01–11) covering topics from HCL fundamentals to EKS with CI/CD.
+A structured learning repository for AWS infrastructure automation with Terraform, organized as 11 progressive modules (01–11) covering topics from HCL fundamentals to EKS with CI/CD. The repository contains ~65 self-contained Terraform projects across ~400 `.tf` files.
 
 ## Standard Terraform Workflow
 
@@ -79,4 +79,17 @@ Directories with `_pending` suffix in `09_eks-cluster-mgmt/` are under review du
 
 ## Helper Script
 
-`aws-resource.py` in the root is a Python utility for AWS resource management (inventory/cleanup).
+`aws-resource.py` scans 27 AWS resource types (EC2, VPC, EBS, ELB, EKS, Lambda, RDS, DynamoDB, ECR, KMS, Secrets Manager, etc.) across multiple accounts for inventory and cleanup. It requires an `accesskey.txt` file (tab-separated `access_key` and `secret_key` pairs, one account per line) in the working directory. Uses multi-threaded scanning (max 30 workers) and outputs a list of discovered non-default resources.
+
+## Workshop IAM Policy
+
+`TerraformWorkshop-Restricted-us-east-1.json` at the root defines the IAM policy applied to workshop student accounts, restricting allowed actions to `us-east-1` only. Reference this when troubleshooting permission errors or understanding which services are available.
+
+## Standard Variable Pattern
+
+Most projects declare these common input variables in `variables.tf`:
+- `aws_region` — defaults to `"us-east-1"`
+- `aws_profile` — defaults to `"my-profile"`
+- `environment` — used for resource name prefixes/tags
+
+Override at apply time: `terraform apply -var="aws_region=ap-northeast-2"`

@@ -9,7 +9,8 @@ RESOURCE_CHECKS = {
     # === Global Services ===
     "IAM Users": ('iam', 'global', 'list_users', 'Users'),
     "CloudFront (Enabled)": ('cloudfront', 'global', 'list_distributions', 'DistributionList'),
-    "WAFv2 ACLs (Global)": ('wafv2', 'global', 'list_web_acls', 'WebACLs'), # [추가] WAFv2 글로벌 (CloudFront)
+    "WAFv2 ACLs (Global)": ('wafv2', 'global', 'list_web_acls', 'WebACLs'), # WAFv2 글로벌 (CloudFront)
+    "Route53 Hosted Zones": ('route53', 'global', 'list_hosted_zones', 'HostedZones'), # [비용주의] Route53
     
     # === Regional Services ===
     "EC2 Instances": ('ec2', 'regional', 'describe_instances', 'Reservations'),
@@ -78,23 +79,41 @@ def check_single_service(session, resource_name, config, region):
             if disabled_customer_keys: # [수정] 변수명 변경
                 return f"{resource_name} 리소스 {len(disabled_customer_keys)}개 발견 (리전: {region})"
         
-        # === [추가] WAFv2 ACLs (Global/CloudFront) ===
+        # === WAFv2 ACLs (Global/CloudFront) — 비용주의 ===
         elif resource_name == 'WAFv2 ACLs (Global)':
-            # 'global' scope (CLOUDFRONT)로 API 호출
-            # (참고: 이 서비스는 'us-east-1' 리전 클라이언트를 사용해야 하며, 
-            # 메인 로직에서 'global' 서비스는 'us-east-1'로만 호출하도록 이미 처리되어 있음)
             response = client.list_web_acls(Scope='CLOUDFRONT')
             resources = response.get(result_key, [])
             if resources:
-                return f"{resource_name} 리소스 {len(resources)}개 발견 (글로벌)"
-        
-        # === [추가] WAFv2 ACLs (Regional) ===
+                names = [r['Name'] for r in resources]
+                return (f"[비용주의] {resource_name} 리소스 {len(resources)}개 발견 (글로벌) "
+                        f"→ 이름: {', '.join(names)}")
+
+        # === WAFv2 ACLs (Regional) — 비용주의 ===
         elif resource_name == 'WAFv2 ACLs (Regional)':
-            # 'regional' scope로 API 호출
             response = client.list_web_acls(Scope='REGIONAL')
             resources = response.get(result_key, [])
             if resources:
-                return f"{resource_name} 리소스 {len(resources)}개 발견 (리전: {region})"
+                names = [r['Name'] for r in resources]
+                return (f"[비용주의] {resource_name} 리소스 {len(resources)}개 발견 (리전: {region}) "
+                        f"→ 이름: {', '.join(names)}")
+
+        # === Route53 Hosted Zones — 비용주의 ===
+        elif resource_name == 'Route53 Hosted Zones':
+            response = client.list_hosted_zones()
+            zones = response.get(result_key, [])
+            # AWS 내부 위임 영역 제외
+            zones = [z for z in zones if not z.get('Config', {}).get('PrivateZone') is None]
+            if zones:
+                zone_names = [z['Name'].rstrip('.') for z in zones]
+                private = [z['Name'].rstrip('.') for z in zones if z.get('Config', {}).get('PrivateZone')]
+                public  = [z['Name'].rstrip('.') for z in zones if not z.get('Config', {}).get('PrivateZone')]
+                detail = []
+                if public:
+                    detail.append(f"퍼블릭: {', '.join(public)}")
+                if private:
+                    detail.append(f"프라이빗: {', '.join(private)}")
+                return (f"[비용주의] {resource_name} {len(zones)}개 발견 (글로벌) "
+                        f"→ {' / '.join(detail)}")
 
         # === [필터링] AMI (self-owned) ===
         elif resource_name == 'AMI':
