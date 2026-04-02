@@ -48,6 +48,32 @@
             "Resource": "*"
         },
         {
+            "Sid": "DenyModifyOrDeleteTerraformUser0",
+            "Effect": "Deny",
+            "Action": [
+                "iam:DeleteUser",
+                "iam:UpdateUser",
+                "iam:DeleteLoginProfile",
+                "iam:UpdateLoginProfile",
+                "iam:CreateLoginProfile",
+                "iam:AttachUserPolicy",
+                "iam:DetachUserPolicy",
+                "iam:PutUserPolicy",
+                "iam:DeleteUserPolicy",
+                "iam:AddUserToGroup",
+                "iam:RemoveUserFromGroup",
+                "iam:CreateAccessKey",
+                "iam:DeleteAccessKey",
+                "iam:UpdateAccessKey",
+                "iam:DeactivateMFADevice",
+                "iam:EnableMFADevice",
+                "iam:DeleteVirtualMFADevice",
+                "iam:TagUser",
+                "iam:UntagUser"
+            ],
+            "Resource": "arn:aws:iam::*:user/terraform-user-0"
+        },
+        {
             "Sid": "DenyHighCostInstanceTypes",
             "Effect": "Deny",
             "Action": "ec2:RunInstances",
