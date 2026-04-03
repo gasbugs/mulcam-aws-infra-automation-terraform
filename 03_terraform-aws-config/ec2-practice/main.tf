@@ -1,55 +1,79 @@
 ##########################################################################
-# 프로바이더 설정
+# 공통 로컬 설정
 ##########################################################################
-# Terraform 설정 및 AWS provider 설정
-terraform {
-  required_version = ">=1.13.4" # Terraform 최소 요구 버전
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
-    }
-  }
+data "aws_availability_zones" "available" {
+  state = "available"
 }
 
-provider "aws" {
-  region  = var.aws_region  # AWS 리전 설정
-  profile = var.aws_profile # AWS CLI 프로필 설정
+locals {
+  azs = slice(data.aws_availability_zones.available.names, 0, 3)
+
+  ec2_instances = {
+    "1" = { az_index = 0 }
+    "2" = { az_index = 1 }
+    "3" = { az_index = 2 }
+  }
 }
 
 ##########################################################################
 # EC2 설정
 ##########################################################################
-# Ubuntu 24.04 AMI ID를 가져오는 data 블록 
 data "aws_ami" "ubuntu" {
   most_recent = true
-  owners      = ["099720109477"] # Canonical의 공식 AWS 계정 ID
+  owners      = ["099720109477"] # Canonical 공식 AWS 계정 ID
 
   filter {
-    name   = "name"                                                          # 이름 필터 설정
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"] # Ubuntu 24.04 AMI 검색
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
   }
 
   filter {
-    name   = "architecture" # 아키텍처 필터 설정
-    values = ["x86_64"]     # 64비트 아키텍처
+    name   = "architecture"
+    values = ["x86_64"]
   }
 }
 
+resource "tls_private_key" "my_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
 
-# EC2 인스턴스 생성
+resource "random_string" "key_name_suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+resource "aws_key_pair" "my_key_pair" {
+  key_name   = "my-key-${random_string.key_name_suffix.result}"
+  public_key = tls_private_key.my_key.public_key_openssh
+
+  tags = {
+    Name        = "my-key-${random_string.key_name_suffix.result}"
+    Environment = var.environment
+  }
+}
+
+# 생성된 개인 키를 로컬 파일로 저장 (state에 평문 저장되므로 원격 백엔드 + 암호화 권장)
+resource "local_file" "private_key" {
+  content         = tls_private_key.my_key.private_key_pem
+  filename        = "${path.module}/my-key.pem"
+  file_permission = "0600"
+}
+
 resource "aws_instance" "my_ec2" {
-  count = 3
-  ami   = data.aws_ami.ubuntu.id
-  #instance_type = "t2.micro"
-  instance_type               = "t2.small"
+  for_each = local.ec2_instances
+
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = var.instance_type
   key_name                    = aws_key_pair.my_key_pair.key_name
-  subnet_id                   = module.my_vpc.public_subnets[count.index]
+  subnet_id                   = module.my_vpc.public_subnets[each.value.az_index]
   vpc_security_group_ids      = [aws_security_group.my_sg.id]
   associate_public_ip_address = true
 
   tags = {
-    Name = "MyFirstInstance-${count.index + 1}" # 인스턴스의 이름 태그
+    Name        = "MyFirstInstance-${each.key}"
+    Environment = var.environment
   }
 
   lifecycle {
@@ -57,75 +81,52 @@ resource "aws_instance" "my_ec2" {
   }
 }
 
-# 랜덤한 문자열 생성 (Key Pair 이름 구성에 사용)
-resource "random_string" "key_name_suffix" {
-  length  = 8     # 랜덤 문자열 길이 설정
-  special = false # 특수 문자 제외
-  upper   = false # 대문자 제외
-}
-
-# 공개 키 파일 읽기
-data "local_file" "public_key" {
-  filename = pathexpand("~/.ssh/my-key.pub") # 로컬 공개 키 파일 경로 설정
-}
-
-# 랜덤 문자열을 포함한 Key Pair 이름 생성
-resource "aws_key_pair" "my_key_pair" {
-  key_name   = "my-key-${random_string.key_name_suffix.result}" # 랜덤한 이름 생성
-  public_key = data.local_file.public_key.content               # 공개 키 설정
-
-  tags = {
-    Name = "MyKeyPair-${random_string.key_name_suffix.result}" # Key Pair 이름 태그
-  }
-}
-
-
 ##########################################################################
 # VPC 설정
 ##########################################################################
-locals {
-  aws_zone_mapping = {
-    "us-east-1" = ["a", "b", "c"]
-  }
-  azs = [for az in local.aws_zone_mapping[var.aws_region] : "${var.aws_region}${az}"]
-}
-
 module "my_vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "6.5.0"
 
-  name = "my-vpc"
-  cidr = "10.0.0.0/16"
+  name = "my-vpc-${var.environment}"
+  cidr = var.vpc_cidr
 
   azs             = local.azs
-  private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
-  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+  private_subnets = var.private_subnet_cidrs
+  public_subnets  = var.public_subnet_cidrs
 
-  enable_nat_gateway = false
-  single_nat_gateway = false
-
+  enable_nat_gateway   = false
+  single_nat_gateway   = false
   enable_dns_hostnames = true
   enable_dns_support   = true
 
   tags = {
     Terraform   = "true"
-    Environment = "dev"
+    Environment = var.environment
   }
 }
 
 resource "aws_security_group" "my_sg" {
-  vpc_id = module.my_vpc.vpc_id
+  name        = "my-sg-${var.environment}"
+  description = "Security group for EC2 instances - allow SSH"
+  vpc_id      = module.my_vpc.vpc_id
+
   ingress {
     from_port   = 22
     to_port     = 22
-    protocol    = "TCP"
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
     from_port   = 0
     to_port     = 0
-    protocol    = -1
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "my-sg-${var.environment}"
+    Environment = var.environment
   }
 }
