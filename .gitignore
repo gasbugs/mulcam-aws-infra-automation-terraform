@@ -36,6 +36,12 @@ override.tf.json
 .terraformrc
 terraform.rc
 
+# Ignore Claude Code configuration
+.claude/
+
+# Ignore Python virtual environment
+.venv/
+
 # Ignore sensitive files
 accesskey.txt
 workshop-credentials-*.csv
