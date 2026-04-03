@@ -5,6 +5,18 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -13,22 +25,26 @@ provider "aws" {
   profile = var.aws_profile
 }
 
+data "aws_availability_zones" "available" {}
+
 resource "aws_vpc" "my_vpc" {
   cidr_block           = var.vpc_cidr_block
   enable_dns_hostnames = true
 
   tags = {
-    Name = "MyVPC"
+    Name        = "MyVPC"
+    Environment = var.environment
   }
 }
 
 resource "aws_subnet" "public_subnet" {
   vpc_id            = aws_vpc.my_vpc.id
   cidr_block        = var.subnet_cidr_block
-  availability_zone = var.availability_zone
+  availability_zone = data.aws_availability_zones.available.names[0]
 
   tags = {
-    Name = "PublicSubnet"
+    Name        = "PublicSubnet"
+    Environment = var.environment
   }
 }
 
@@ -36,7 +52,8 @@ resource "aws_internet_gateway" "my_igw" {
   vpc_id = aws_vpc.my_vpc.id
 
   tags = {
-    Name = "MyInternetGateway"
+    Name        = "MyInternetGateway"
+    Environment = var.environment
   }
 }
 
@@ -49,11 +66,12 @@ resource "aws_route_table" "public_route_table" {
   }
 
   tags = {
-    Name = "PublicRouteTable"
+    Name        = "PublicRouteTable"
+    Environment = var.environment
   }
 }
 
-resource "aws_route_table_association" "public_subnet_assocication" {
+resource "aws_route_table_association" "public_subnet_association" {
   route_table_id = aws_route_table.public_route_table.id
   subnet_id      = aws_subnet.public_subnet.id
 }
@@ -76,7 +94,8 @@ resource "aws_security_group" "my_sg" {
   }
 
   tags = {
-    Name = "MySecrutiyGroup"
+    Name        = "MySecurityGroup"
+    Environment = var.environment
   }
 }
 
@@ -112,7 +131,8 @@ resource "aws_instance" "my_ec2" {
   }
 
   tags = {
-    Name = "MyEC2Instance" # 인스턴스에 "MyEC2Instance"라는 이름 태그 추가
+    Name        = "MyEC2Instance" # 인스턴스에 "MyEC2Instance"라는 이름 태그 추가
+    Environment = var.environment
   }
 }
 
@@ -120,10 +140,11 @@ resource "aws_instance" "my_ec2" {
 resource "aws_ebs_volume" "example_volume" {
   availability_zone = aws_instance.my_ec2.availability_zone # EC2 인스턴스와 동일한 AZ
   size              = 10                                    # 볼륨 크기 (GB)
-  type              = "gp2"                                 # 볼륨 타입 (예: gp2, io1 등)
+  type              = "gp3"                                 # 볼륨 타입 (예: gp3, io1 등)
   encrypted         = true                                  # 암호화 여부
   tags = {
-    Name = "ExampleVolume"
+    Name        = "ExampleVolume"
+    Environment = var.environment
   }
 }
 
@@ -140,11 +161,18 @@ resource "random_string" "key_name_suffix" {
   upper   = false
 }
 
-locals {
-  public_key_path = pathexpand("~/.ssh/my-key.pub")
+resource "tls_private_key" "my_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "local_sensitive_file" "private_key" {
+  content         = tls_private_key.my_key.private_key_pem
+  filename        = "${path.module}/my-key.pem"
+  file_permission = "0600"
 }
 
 resource "aws_key_pair" "my_key_pair" {
   key_name   = "my-key-${random_string.key_name_suffix.result}"
-  public_key = file(local.public_key_path)
+  public_key = tls_private_key.my_key.public_key_openssh
 }

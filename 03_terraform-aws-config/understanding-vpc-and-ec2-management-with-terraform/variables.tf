@@ -22,10 +22,10 @@ variable "subnet_cidr_block" {
   default     = "10.0.1.0/24"
 }
 
-variable "availability_zone" {
-  description = "서브넷을 배치할 가용영역"
+variable "environment" {
+  description = "배포 환경 (예: dev, staging, prod)"
   type        = string
-  default     = "us-east-1a"
+  default     = "dev"
 }
 
 variable "instance_type" {
