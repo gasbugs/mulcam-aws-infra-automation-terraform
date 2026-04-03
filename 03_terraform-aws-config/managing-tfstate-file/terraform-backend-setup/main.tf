@@ -4,7 +4,11 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws" # AWS 프로바이더 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
+      version = "~> 6.0"        # 6.x.x 버전 이상의 AWS 프로바이더 사용
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
     }
   }
 }
@@ -14,14 +18,31 @@ provider "aws" {
   profile = var.aws_profile # 사용할 AWS CLI 프로파일 설정
 }
 
+# 전역 고유 이름을 위한 랜덤 접미사 생성
+resource "random_string" "suffix" {
+  length  = 8
+  upper   = false
+  special = false
+}
+
 # S3 버킷을 사용하여 Terraform 상태 관리
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = var.s3_bucket_name # 상태 파일을 저장할 S3 버킷 이름
+  bucket = "${var.s3_bucket_name}-${random_string.suffix.result}" # 전역 고유 이름 보장
 
   tags = {
     Name        = "TerraformStateBucket" # S3 버킷 이름 태그 지정
     Environment = var.environment        # 환경 태그 추가 (예: dev, prod)
   }
+}
+
+# S3 버킷 퍼블릭 액세스 차단 설정
+resource "aws_s3_bucket_public_access_block" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # S3 버킷 버전 관리 설정
@@ -46,9 +67,9 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "example" {
 
 # DynamoDB 테이블 생성 (잠금 관리를 위한 테이블)
 resource "aws_dynamodb_table" "terraform_lock" {
-  name         = var.dynamodb_table_name # 잠금 관리를 위한 테이블 이름
-  billing_mode = "PAY_PER_REQUEST"       # 사용량 기반 과금 설정
-  hash_key     = "LockID"                # 해시 키 설정 (잠금 식별자)
+  name         = "${var.dynamodb_table_name}-${random_string.suffix.result}" # 계정 내 고유 이름 보장
+  billing_mode = "PAY_PER_REQUEST"                                           # 사용량 기반 과금 설정
+  hash_key     = "LockID"                                                    # 해시 키 설정 (잠금 식별자)
 
   attribute {
     name = "LockID" # 테이블 해시 키 이름

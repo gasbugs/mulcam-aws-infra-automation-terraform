@@ -21,16 +21,16 @@ variable "environment" {
   default     = "dev"                              # 기본값: dev
 }
 
-# S3 버킷 이름 (Terraform 상태 파일 저장용)
+# S3 버킷 이름 베이스 (Terraform 상태 파일 저장용, 랜덤 접미사가 자동 추가됨)
 variable "s3_bucket_name" {
-  description = "Terraform 상태 파일을 저장할 S3 버킷 이름"      # S3 버킷 설명
-  type        = string                               # 문자열 타입
-  default     = "my-terraform-state-bucket-nickname" # 기본값: my-terraform-state-bucket-gasbugs
+  description = "Terraform 상태 파일을 저장할 S3 버킷 이름 (랜덤 접미사 자동 추가)" # S3 버킷 설명
+  type        = string                                                  # 문자열 타입
+  default     = "my-terraform-state-bucket-nickname"                    # 기본값: my-terraform-state-bucket-nickname
 }
 
-# DynamoDB 테이블 이름 (상태 잠금용)
+# DynamoDB 테이블 이름 베이스 (상태 잠금용, 랜덤 접미사가 자동 추가됨)
 variable "dynamodb_table_name" {
-  description = "Terraform 상태 잠금에 사용할 DynamoDB 테이블 이름" # DynamoDB 테이블 설명
-  type        = string                                 # 문자열 타입
-  default     = "terraform-state-lock-nickname"        # 기본값: terraform-state-lock-gasbugs
+  description = "Terraform 상태 잠금에 사용할 DynamoDB 테이블 이름 (랜덤 접미사 자동 추가)" # DynamoDB 테이블 설명
+  type        = string                                                        # 문자열 타입
+  default     = "terraform-state-lock-nickname"                               # 기본값: terraform-state-lock-nickname
 }
