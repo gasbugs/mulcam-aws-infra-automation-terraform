@@ -28,3 +28,17 @@ variable "instance_type" {
   type        = string        # 문자열 타입
   default     = "t3.micro"    # 기본값: t3.micro
 }
+
+# Terraform 상태 파일을 저장할 S3 버킷 이름
+variable "s3_bucket_name" {
+  description = "Terraform 상태 파일을 저장할 S3 버킷 이름"
+  type        = string
+  default     = "my-terraform-state-bucket-nickname-amgz9opt"
+}
+
+# 상태 잠금에 사용할 DynamoDB 테이블 이름
+variable "dynamodb_table_name" {
+  description = "Terraform 상태 잠금에 사용할 DynamoDB 테이블 이름"
+  type        = string
+  default     = "terraform-state-lock-nickname-amgz9opt"
+}
