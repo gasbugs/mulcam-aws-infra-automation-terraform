@@ -121,7 +121,7 @@ variable "ec2_ami_id" {
 variable "ec2_instance_type" {
   description = "Instance type for EC2"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.micro"
 }
 
 variable "ec2_public_key_path" {

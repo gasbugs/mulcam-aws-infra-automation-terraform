@@ -150,7 +150,7 @@ resource "aws_key_pair" "ec2_key_pair" {
 # EC2 인스턴스 생성
 resource "aws_instance" "example_ec2" {
   ami                  = var.ami_id                                         # 사용할 AMI ID
-  instance_type        = "t2.micro"                                         # 인스턴스 유형
+  instance_type        = "t3.micro"                                         # 인스턴스 유형
   iam_instance_profile = aws_iam_instance_profile.ec2_instance_profile.name # EC2 인스턴스에 할당할 IAM 인스턴스 프로파일
   security_groups      = [aws_security_group.ec2_security_group.name]       # EC2에 적용할 보안 그룹
   key_name             = aws_key_pair.ec2_key_pair.key_name                 # SSH 접속을 위한 키 페어 이름

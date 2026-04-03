@@ -34,7 +34,7 @@ data "aws_ami" "al2023" {
 resource "aws_instance" "example1" {
   count         = 3                      # 3개의 인스턴스를 생성
   ami           = data.aws_ami.al2023.id # 사용할 AMI ID
-  instance_type = "t2.micro"             # EC2 인스턴스 유형 설정
+  instance_type = "t3.micro"             # EC2 인스턴스 유형 설정
 
   tags = {
     Name = "Example-Instance-${count.index}" # 각 인스턴스에 고유한 이름 태그 지정
@@ -46,7 +46,7 @@ resource "aws_instance" "example1" {
 resource "aws_instance" "example2" {
   for_each      = toset(["dev", "staging", "prod"]) # 환경별(dev, staging, prod)로 인스턴스를 생성
   ami           = data.aws_ami.al2023.id            # 사용할 AMI ID
-  instance_type = "t2.micro"                        # EC2 인스턴스 유형 설정
+  instance_type = "t3.micro"                        # EC2 인스턴스 유형 설정
 
   tags = {
     Name = "Example-Instance-${each.key}" # 각 환경에 맞는 고유 이름 태그 지정

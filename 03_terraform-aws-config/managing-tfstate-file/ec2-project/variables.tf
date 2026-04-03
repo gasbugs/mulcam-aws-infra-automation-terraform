@@ -26,5 +26,5 @@ variable "environment" {
 variable "instance_type" {
   description = "생성할 인스턴스 유형" # 인스턴스 타입 설명
   type        = string        # 문자열 타입
-  default     = "t2.micro"    # 기본값: t2.micro
+  default     = "t3.micro"    # 기본값: t3.micro
 }

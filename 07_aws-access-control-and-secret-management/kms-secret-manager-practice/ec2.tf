@@ -50,7 +50,7 @@ data "aws_ami" "al2023" {
 # EC2 인스턴스 생성
 resource "aws_instance" "ec2_instance" {
   ami                         = data.aws_ami.al2023.id                             # AMI ID는 변수로 입력받음
-  instance_type               = "t2.micro"                                         # 인스턴스 타입 설정
+  instance_type               = "t3.micro"                                         # 인스턴스 타입 설정
   key_name                    = aws_key_pair.ec2_key_pair.key_name                 # 생성된 키 페어 이름 사용
   iam_instance_profile        = aws_iam_instance_profile.ec2_instance_profile.name # IAM 인스턴스 프로파일 연결
   associate_public_ip_address = true

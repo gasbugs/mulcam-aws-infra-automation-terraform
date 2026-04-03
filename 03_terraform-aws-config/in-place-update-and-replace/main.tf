@@ -6,7 +6,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
+      version = "~> 6.0"        # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
     }
   }
 }
@@ -79,7 +79,7 @@ resource "null_resource" "trigger_bootstrap_change" {
 resource "aws_instance" "my_ec2" {
   # 사용할 AMI ID - AMI ID 변경 시 replace 업데이트됨
   ami           = true ? data.aws_ami.al2023.id : data.aws_ami.ubuntu.id
-  instance_type = "t2.micro" # 인스턴스 유형 설정 - in-place 업데이트됨
+  instance_type = "t3.small" # 인스턴스 유형 설정 - in-place 업데이트됨
   # instance_type = "c5.large"
 
   # 태그 이름 - in-place 업데이트됨

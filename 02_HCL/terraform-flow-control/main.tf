@@ -10,7 +10,7 @@ provider "aws" {
 
 # 예시 2: 동적인 값 할당
 locals {
-  instance_type = var.environment == "prod" ? "m5.large" : "t2.micro"
+  instance_type = var.environment == "prod" ? "m5.large" : "t3.micro"
 }
 
 # 예시4: 맵을 통한 조건 값 선택

@@ -54,7 +54,7 @@ data "aws_ami" "al2023" {
 # AWS EC2 인스턴스 리소스를 정의
 resource "aws_instance" "example" {
   ami                         = data.aws_ami.al2023.id # 위에서 정의한 Amazon Linux 2023 AMI ID를 사용
-  instance_type               = "t2.micro"             # EC2 인스턴스 타입을 t2.micro로 설정
+  instance_type               = "t3.micro"             # EC2 인스턴스 타입을 t3.micro로 설정
   associate_public_ip_address = true
   key_name                    = aws_key_pair.example.key_name
 }

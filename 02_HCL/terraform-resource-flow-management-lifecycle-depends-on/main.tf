@@ -53,7 +53,7 @@ resource "aws_security_group" "example_sg" {
 # EC2 인스턴스 생성
 resource "aws_instance" "example_create_before_destroy_with_dependency" {
   ami           = data.aws_ami.ubuntu.id
-  instance_type = "t2.micro"
+  instance_type = "t3.micro"
 
   # security_groups = [aws_security_group.example_sg.id]
 

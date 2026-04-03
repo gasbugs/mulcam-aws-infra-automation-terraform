@@ -18,7 +18,7 @@ variable "aws_region" {
 # 인스턴스 타입을 정의하는 변수
 variable "instance_type" {
   type    = string
-  default = "t2.micro" # 기본 인스턴스 타입: t2.micro
+  default = "t3.micro" # 기본 인스턴스 타입: t3.micro
 }
 
 # AWS CLI에서 사용할 프로파일을 정의하는 변수

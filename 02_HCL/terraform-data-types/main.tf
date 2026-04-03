@@ -4,7 +4,7 @@
 variable "instance_type" {
   description = "사용할 인스턴스 타입"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.micro"
 }
 
 # 숫자 변수
@@ -58,7 +58,7 @@ variable "server_config" {
   })
   default = {
     name          = "web-server"
-    instance_type = "t2.micro"
+    instance_type = "t3.micro"
     disk_size     = 50
   }
 }

@@ -3,7 +3,7 @@ aws_region  = "us-east-1"  # 원하는 AWS 리전 지정
 aws_profile = "my-profile" # 사용할 AWS CLI 프로파일 이름 지정
 
 # EC2 인스턴스 관련 설정
-instance_type = "t2.micro"       # EC2 인스턴스 타입 지정
+instance_type = "t3.micro"       # EC2 인스턴스 타입 지정
 instance_name = "WebServer-Prod" # EC2 인스턴스 이름 지정
 
 # 태그 관련 설정

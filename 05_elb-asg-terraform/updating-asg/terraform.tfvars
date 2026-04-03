@@ -11,7 +11,7 @@ ami_id  = "ami-09b37ee864e47c84c" # packer를 통해 생성된 nginx_new 이미�
 asg_tag = "new-nginx-asg"
 
 # 오토 스케일링 그룹의 원하는 설정
-instance_type    = "t2.micro"
+instance_type    = "t3.micro"
 desired_capacity = 2
 max_size         = 4
 min_size         = 1

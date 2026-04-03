@@ -19,7 +19,7 @@ provider "aws" {
 # EC2 인스턴스 생성
 resource "aws_instance" "my_ec2" {
   ami           = data.aws_ami.al2023.id # 사용할 AMI ID
-  instance_type = var.instance_type      # 인스턴스 유형 설정 (예: t2.micro)
+  instance_type = var.instance_type      # 인스턴스 유형 설정 (예: t3.micro)
 
   tags = {
     Name        = "MyEC2Instance" # 인스턴스의 이름 태그

@@ -29,7 +29,7 @@ variable "environment" {
 variable "instance_type" {
   description = "Instance type for the EC2 instance"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.micro"
 }
 
 # EC2 인스턴스의 Name 태그

@@ -29,7 +29,7 @@ redis_parameter_group_name = "default.valkey8.cluster.on"
 #######################################
 # EC2에 대한 변수
 ec2_ami_id                  = "ami-0fff1b9a61dec8a5f"
-ec2_instance_type           = "t2.micro"
+ec2_instance_type           = "t3.micro"
 ec2_public_key_path         = "~/.ssh/my-key.pub"
 ec2_allowed_ssh_cidr_blocks = ["0.0.0.0/0"]
 

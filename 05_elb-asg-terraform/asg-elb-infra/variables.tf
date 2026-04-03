@@ -18,7 +18,7 @@ variable "pub_key_file_path" {
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.micro"
 }
 
 # 원하는 오토 스케일링 그룹의 크기를 정의

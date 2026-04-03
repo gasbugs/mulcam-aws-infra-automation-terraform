@@ -14,7 +14,7 @@ variable "ami_name" {
 
 source "amazon-ebs" "amazon-linux-2023" {
   ami_name      = var.ami_name
-  instance_type = "t2.micro"
+  instance_type = "t3.micro"
   region        = "us-east-1"
   
   source_ami_filter {

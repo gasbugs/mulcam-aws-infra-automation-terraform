@@ -2,7 +2,7 @@
 resource "aws_launch_template" "wordpress" {
   name_prefix   = "wordpress-"
   image_id      = "ami-0cd913f496bae5294" # WordPress가 설치된 AMI ID로 변경하세요
-  instance_type = "t2.micro"
+  instance_type = "t3.micro"
 
   vpc_security_group_ids = [aws_security_group.wordpress_sg.id]
 

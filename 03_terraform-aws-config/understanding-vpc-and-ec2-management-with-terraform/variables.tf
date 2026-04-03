@@ -31,7 +31,7 @@ variable "availability_zone" {
 variable "instance_type" {
   description = "EC2 인스턴스 유형"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.micro"
 }
 
 variable "associate_public_ip" {
