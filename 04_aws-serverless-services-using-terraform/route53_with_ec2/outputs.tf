@@ -4,6 +4,12 @@ output "key_pair_name" {
   value       = aws_key_pair.generated_key_pair.key_name
 }
 
+# 로컬에 저장된 프라이빗 키 파일 경로 출력
+output "private_key_path" {
+  description = "Path to the locally saved private key file for SSH access."
+  value       = local_sensitive_file.private_key.filename
+}
+
 # EC2 인스턴스의 퍼블릭 IP 출력 (SSH 연결을 위해)
 output "ec2_public_ip" {
   description = "The public IP address of the EC2 instance."
@@ -26,4 +32,9 @@ output "private_dns_zone_id" {
 output "test_record_1_fqdn" {
   description = "The fully qualified domain name (FQDN) of the test DNS record."
   value       = aws_route53_record.test_record_1.fqdn
+}
+
+output "test_record_2_fqdn" {
+  description = "The fully qualified domain name (FQDN) of the second test DNS record."
+  value       = aws_route53_record.test_record_2.fqdn
 }

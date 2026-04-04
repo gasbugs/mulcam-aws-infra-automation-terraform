@@ -1,11 +1,8 @@
 ##########################################################################
 # VPC 설정
 ##########################################################################
-locals {
-  aws_zone_mapping = {
-    "us-east-1" = ["a", "b", "c"]
-  }
-  azs = [for az in local.aws_zone_mapping[var.aws_region] : "${var.aws_region}${az}"]
+data "aws_availability_zones" "available" {
+  state = "available"
 }
 
 module "my_vpc" {
@@ -15,12 +12,10 @@ module "my_vpc" {
   name = "my-vpc"
   cidr = "10.0.0.0/16"
 
-  azs             = local.azs
-  private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
-  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+  azs            = data.aws_availability_zones.available.names
+  public_subnets = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 
   enable_nat_gateway = false
-  single_nat_gateway = false
 
   enable_dns_hostnames = true
   enable_dns_support   = true
@@ -34,16 +29,23 @@ module "my_vpc" {
 ##########################################################################
 # EC2 설정
 ##########################################################################
-# 랜덤한 숫자 생성 (키 페어 이름에 사용)
-resource "random_integer" "key_suffix" {
-  min = 1000 # 최소 값
-  max = 9999 # 최대 값
+# RSA 키 페어 생성 (tls 프로바이더)
+resource "tls_private_key" "ec2_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
 }
 
-# 키 페어 생성
+# 프라이빗 키를 로컬 파일로 저장
+resource "local_sensitive_file" "private_key" {
+  content         = tls_private_key.ec2_key.private_key_pem
+  filename        = "${path.module}/my-key.pem"
+  file_permission = "0600"
+}
+
+# AWS 키 페어 등록
 resource "aws_key_pair" "generated_key_pair" {
-  key_name   = "my-key-${random_integer.key_suffix.result}" # 랜덤한 숫자를 포함한 키 페어 이름
-  public_key = file(pathexpand(var.pub_key_file_path))      # 공개 키 파일의 경로 지정 (로컬에 저장된 .pub 파일)
+  key_name   = "my-key"
+  public_key = tls_private_key.ec2_key.public_key_openssh
 }
 
 # 보안 그룹 생성 (SSH와 DNS 쿼리를 허용)
