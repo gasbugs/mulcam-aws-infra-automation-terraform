@@ -1,14 +1,21 @@
 [Unit]
 Description=Spring Boot Application
-After=syslog.target network.target
+# network-online.target: 네트워크가 완전히 준비된 뒤 앱을 시작 (syslog.target은 최신 systemd에서 deprecated)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 User=ec2-user
+WorkingDirectory=/home/ec2-user/app
 ExecStart=/usr/bin/java -jar /home/ec2-user/app/demo-0.0.1-SNAPSHOT.jar
+# Java 앱은 SIGTERM 신호 수신 시 143 코드로 종료 — 정상 종료로 처리
 SuccessExitStatus=143
 TimeoutStopSec=10
 Restart=on-failure
 RestartSec=5
+# 로그를 systemd 저널(journalctl)로 출력하여 추적 가능하게 함
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

@@ -1,4 +1,7 @@
 #!/bin/bash
+# 에러 발생 시 즉시 중단 (Fail-fast) — 설치 실패를 조용히 넘기지 않음
+set -e
+set -o pipefail
 
 # 패키지 업데이트
 sudo dnf update -y
