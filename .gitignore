@@ -51,13 +51,13 @@ workshop-credentials-*.csv
 *.zip
 
 # =========================
-# Spring Boot / Maven Build (05_elb-asg-terraform/packer_for_javaspring)
+# Spring Boot / Maven Build (05_elb-asg-terraform/packer-for-javaspring)
 # =========================
 # target 폴더 전체 무시 (빌드 산출물은 git에 포함하지 않음)
 target/
 # 단, 특정 target 폴더는 예외 — git이 내부를 탐색할 수 있도록 디렉토리 자체를 허용
-!05_elb-asg-terraform/packer_for_javaspring/target/
+!05_elb-asg-terraform/packer-for-javaspring/target/
 # 허용된 target 폴더 안의 모든 파일/하위 폴더를 다시 무시
-05_elb-asg-terraform/packer_for_javaspring/target/**
+05_elb-asg-terraform/packer-for-javaspring/target/**
 # 단, 컴파일된 최종 jar 파일만 Git에 포함 (Packer 빌드에 필요)
-!05_elb-asg-terraform/packer_for_javaspring/target/demo-0.0.1-SNAPSHOT.jar
+!05_elb-asg-terraform/packer-for-javaspring/target/demo-0.0.1-SNAPSHOT.jar

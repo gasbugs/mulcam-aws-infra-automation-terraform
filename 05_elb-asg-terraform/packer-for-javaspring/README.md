@@ -59,7 +59,7 @@ Docker/Podman 컨테이너              Packer (AWS EC2 임시 인스턴스)
 ### 단계별 실행 (권장)
 
 ```bash
-cd 05_elb-asg-terraform/packer_for_javaspring
+cd 05_elb-asg-terraform/packer-for-javaspring
 
 # 1단계: JAR 빌드
 ./build.sh
@@ -71,7 +71,7 @@ AWS_PROFILE=my-profile ./pack.sh
 ### 한 번에 실행
 
 ```bash
-cd 05_elb-asg-terraform/packer_for_javaspring
+cd 05_elb-asg-terraform/packer-for-javaspring
 AWS_PROFILE=my-profile ./build_and_pack.sh
 ```
 

@@ -36,7 +36,7 @@ packer init <template>.pkr.hcl
 packer build <template>.pkr.hcl
 ```
 
-The Java Spring Boot example (`05_elb-asg-terraform/packer_for_javaspring/`) has a full Docker→Packer pipeline:
+The Java Spring Boot example (`05_elb-asg-terraform/packer-for-javaspring/`) has a full Docker→Packer pipeline:
 
 ```bash
 ./build_and_pack.sh   # Docker build + Packer AMI bake
