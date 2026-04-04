@@ -8,12 +8,6 @@ variable "aws_profile" {
   type        = string
 }
 
-# 퍼블릭 키 경로
-variable "pub_key_file_path" {
-  description = "value"
-  type        = string
-}
-
 # 인스턴스 타입을 변수로 정의 (필요시 변경 가능)
 variable "instance_type" {
   description = "EC2 instance type"
@@ -40,19 +34,21 @@ variable "min_size" {
   default     = 2
 }
 
-variable "private_key_file_path" {
-  description = "Path to the private key file for the ACM certificate"
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
   type        = string
+  default     = "10.0.0.0/16"
 }
 
-variable "certificate_body_file_path" {
-  description = "Path to the certificate body file for the ACM certificate"
-  type        = string
+variable "public_subnets" {
+  description = "List of public subnet CIDR blocks"
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
 }
 
-/*
-variable "certificate_chain_file_path" {
-  description = "Path to the certificate chain file for the ACM certificate"
-  type        = string
+variable "private_subnets" {
+  description = "List of private subnet CIDR blocks"
+  type        = list(string)
+  default     = ["10.0.3.0/24", "10.0.4.0/24"]
 }
-*/
+
