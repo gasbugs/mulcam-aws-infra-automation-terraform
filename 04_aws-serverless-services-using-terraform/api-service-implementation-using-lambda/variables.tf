@@ -13,3 +13,10 @@ variable "aws_profile" {
   type        = string
   default     = "my-profile"
 }
+
+# 환경 이름 설정
+variable "environment" {
+  description = "환경 이름 (dev/staging/prod) — 리소스 이름 및 태그에 사용"
+  type        = string
+  default     = "dev"
+}

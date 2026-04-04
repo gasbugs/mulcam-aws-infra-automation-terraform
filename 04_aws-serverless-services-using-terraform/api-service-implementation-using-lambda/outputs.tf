@@ -6,10 +6,18 @@ output "lambda_function_name" {
   value       = aws_lambda_function.my_lambda.function_name
 }
 
-# API Gateway의 엔드포인트 URL 출력
-output "api_endpoint" {
-  description = "API Gateway의 엔드포인트 URL"
+# API Gateway dev 스테이지 엔드포인트 URL 출력
+# 호출 예: https://<id>.execute-api.us-east-1.amazonaws.com/dev/hello
+output "api_endpoint_dev" {
+  description = "API Gateway dev 스테이지 엔드포인트 URL"
   value       = aws_apigatewayv2_stage.dev.invoke_url
+}
+
+# API Gateway default 스테이지 엔드포인트 URL 출력
+# 호출 예: https://<id>.execute-api.us-east-1.amazonaws.com/hello
+output "api_endpoint_default" {
+  description = "API Gateway default 스테이지 엔드포인트 URL"
+  value       = aws_apigatewayv2_stage.default.invoke_url
 }
 
 # S3 버킷 이름 출력
