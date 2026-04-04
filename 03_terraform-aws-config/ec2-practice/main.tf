@@ -61,7 +61,26 @@ resource "local_file" "private_key" {
   file_permission = "0600"
 }
 
+
 resource "aws_instance" "my_ec2" {
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = var.instance_type
+  key_name                    = aws_key_pair.my_key_pair.key_name
+  subnet_id                   = module.my_vpc.public_subnets[0]
+  vpc_security_group_ids      = [aws_security_group.my_sg.id]
+  associate_public_ip_address = true
+
+  tags = {
+    Name        = "MyFirstInstance"
+    Environment = var.environment
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_instance" "my_ec2_for_each" {
   for_each = local.ec2_instances
 
   ami                         = data.aws_ami.ubuntu.id
@@ -86,7 +105,7 @@ resource "aws_instance" "my_ec2" {
 ##########################################################################
 module "my_vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "6.5.0"
+  version = "6.6.1"
 
   name = "my-vpc-${var.environment}"
   cidr = var.vpc_cidr
