@@ -9,5 +9,5 @@ environment = "dev"            # 환경 (예: dev, prod)
 # S3 웹사이트 설정
 index_document      = "index.html"       # 정적 웹사이트의 인덱스 파일
 error_document      = "error.html"       # 정적 웹사이트의 에러 페이지 파일
-index_document_path = "files/index.html" # 로컬에서 인덱스 파일 경로
-error_document_path = "files/error.html" # 로컬에서 에러 파일 경로
+index_document_path = "web/index.html" # 로컬에서 인덱스 파일 경로
+error_document_path = "web/error.html" # 로컬에서 에러 파일 경로
