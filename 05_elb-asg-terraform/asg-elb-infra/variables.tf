@@ -8,12 +8,6 @@ variable "aws_profile" {
   type        = string
 }
 
-# 퍼블릭 키 경로
-variable "pub_key_file_path" {
-  description = "value"
-  type        = string
-}
-
 # 인스턴스 타입을 변수로 정의 (필요시 변경 가능)
 variable "instance_type" {
   description = "EC2 instance type"

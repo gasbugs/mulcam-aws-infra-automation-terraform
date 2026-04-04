@@ -3,12 +3,14 @@
 variable "aws_region" {
   description = "AWS 리전"
   type        = string
+  default     = "us-east-1"
 }
 
 # AWS CLI를 사용할 때 참조할 프로파일 이름을 지정하는 변수
 variable "aws_profile" {
   description = "AWS CLI 프로파일"
   type        = string
+  default     = "my-profile"
 }
 
 # EC2 인스턴스의 소유자 또는 담당 팀을 나타내는 변수

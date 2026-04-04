@@ -1,19 +1,9 @@
-# Terraform 및 AWS 프로바이더 버전 설정
-terraform {
-  required_version = ">= 1.13.4" # Terraform 최소 요구 버전
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
-    }
-  }
-}
-
-# AWS 프로바이더 설정
+# AWS 프로바이더 설정: 리소스를 어느 리전·계정으로 배포할지 지정
 provider "aws" {
   region  = var.aws_region  # 리소스를 배포할 AWS 리전
   profile = var.aws_profile # 인증에 사용할 AWS CLI 프로파일
 
+  # 모든 리소스에 자동으로 붙는 공통 태그 (프로바이더 수준에서 일괄 적용)
   default_tags {
     tags = {
       Environment = var.environment

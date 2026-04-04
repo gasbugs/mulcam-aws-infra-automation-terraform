@@ -1,4 +1,12 @@
-# AMI 검색 
+# 로컬 변수 설정: 공통 태그 (모든 리소스에 공통으로 붙는 태그 묶음)
+locals {
+  common_tags = {
+    Project    = var.project
+    CostCenter = var.cost_center
+  }
+}
+
+# AMI 검색: 가장 최신 Amazon Linux 2023 이미지를 자동으로 찾아옴
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -14,10 +22,11 @@ data "aws_ami" "al2023" {
   }
 }
 
-# EC2 인스턴스 생성
+# EC2 인스턴스 생성: 웹 서버 역할을 하는 가상 머신
 resource "aws_instance" "web_server" {
-  ami           = data.aws_ami.al2023.id
-  instance_type = var.instance_type
+  ami                         = data.aws_ami.al2023.id
+  instance_type               = var.instance_type
+  associate_public_ip_address = true # 퍼블릭 IP를 할당해 외부에서 접근 가능하게 설정
 
   # 태그 설정: 공통 태그 및 추가 태그를 병합 (겹치는 값이 있으면 뒤에 값이 우선됨)
   tags = merge(
@@ -26,13 +35,4 @@ resource "aws_instance" "web_server" {
       Name = var.instance_name
     }
   )
-}
-
-# 로컬 변수 설정: 공통 태그
-locals {
-  common_tags = {
-    Name       = "default"
-    Project    = var.project
-    CostCenter = var.cost_center
-  }
 }

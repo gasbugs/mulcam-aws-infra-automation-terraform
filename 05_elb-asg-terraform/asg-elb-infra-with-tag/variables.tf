@@ -8,12 +8,6 @@ variable "aws_profile" {
   type        = string
 }
 
-# 퍼블릭 키 경로
-variable "pub_key_file_path" {
-  description = "value"
-  type        = string
-}
-
 # 인스턴스 타입을 변수로 정의 (필요시 변경 가능)
 variable "instance_type" {
   description = "EC2 instance type"
@@ -38,4 +32,41 @@ variable "min_size" {
   description = "Minimum number of instances in the Auto Scaling group"
   type        = number
   default     = 2
+}
+
+# 리소스 태그에 사용할 공통 값들
+variable "project" {
+  description = "프로젝트 이름 (태그에 사용)"
+  type        = string
+  default     = "MarketingApp"
+}
+
+variable "environment" {
+  description = "배포 환경 이름 (예: Production, Staging, Dev)"
+  type        = string
+  default     = "Production"
+}
+
+variable "owner" {
+  description = "리소스 소유 팀 이름 (비용 추적 및 책임 소재 식별용)"
+  type        = string
+  default     = "TeamA"
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "public_subnets" {
+  description = "List of public subnet CIDR blocks"
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+}
+
+variable "private_subnets" {
+  description = "List of private subnet CIDR blocks"
+  type        = list(string)
+  default     = ["10.0.3.0/24", "10.0.4.0/24"]
 }
