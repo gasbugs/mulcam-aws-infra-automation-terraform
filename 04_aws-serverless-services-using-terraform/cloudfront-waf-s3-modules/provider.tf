@@ -4,7 +4,11 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
+      version = "~> 6.0"        # 6.x.x 버전 이상의 AWS 프로바이더 사용
+    }
+    random = {
+      source  = "hashicorp/random" # S3 버킷 이름에 붙일 랜덤 숫자를 생성할 때 필요한 프로바이더
+      version = "~> 3.0"
     }
   }
 }
