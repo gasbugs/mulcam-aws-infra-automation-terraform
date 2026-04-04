@@ -14,17 +14,13 @@ resource "aws_s3_bucket" "static_site" {
   }
 }
 
-# S3 버킷의 정적 웹사이트 설정 구성
-resource "aws_s3_bucket_website_configuration" "static_site_website" {
-  bucket = aws_s3_bucket.static_site.id
-
-  index_document {
-    suffix = var.index_document
-  }
-
-  error_document {
-    key = var.error_document
-  }
+# CloudFront OAC 방식 사용 시 퍼블릭 액세스 차단 필수
+resource "aws_s3_bucket_public_access_block" "static_site" {
+  bucket                  = aws_s3_bucket.static_site.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # S3 버킷에 인덱스 파일 업로드
@@ -33,6 +29,7 @@ resource "aws_s3_object" "index" {
   key          = var.index_document
   source       = var.index_document_path
   content_type = "text/html"
+  etag         = filemd5(var.index_document_path)
 }
 
 # S3 버킷에 에러 파일 업로드
@@ -41,5 +38,5 @@ resource "aws_s3_object" "error" {
   key          = var.error_document
   source       = var.error_document_path
   content_type = "text/html"
+  etag         = filemd5(var.error_document_path)
 }
-

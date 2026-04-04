@@ -13,12 +13,12 @@ variable "bucket_domain_name" {
   type        = string
 }
 
-variable "bucket_arn" {
-  description = "S3 버킷의 ARN"
+variable "index_document" {
+  description = "CloudFront 기본 루트 오브젝트 (예: index.html)"
   type        = string
 }
 
-variable "index_document" {
-  description = "CloudFront 기본 루트 오브젝트 (예: index.html)"
+variable "error_document" {
+  description = "오류 발생 시 보여줄 에러 페이지 파일 이름 (예: error.html)"
   type        = string
 }

@@ -1,14 +1,5 @@
-variable "aws_region" {
-  default = "us-east-1"
-}
-
 variable "private_dns_name" {
   description = "Private DNS 도메인 이름"
-  type        = string
-}
-
-variable "ami_id" {
-  description = "EC2 인스턴스에 사용할 AMI ID"
   type        = string
 }
 
@@ -17,17 +8,12 @@ variable "instance_type" {
   type        = string
 }
 
-variable "pub_key_file_path" {
-  description = "공개 키 위치 정보"
-  type        = string
-}
-
 variable "cloudfront_domain_name" {
-  description = "aws_cloudfront_distribution.s3_distribution.domain_name"
+  description = "Route53 alias 레코드가 가리킬 CloudFront 배포의 도메인 이름"
   type        = string
 }
 
 variable "cloudfront_hosted_zone_id" {
-  description = "aws_cloudfront_distribution.s3_distribution.hosted_zone_id"
+  description = "Route53 alias 레코드 설정에 필요한 CloudFront 배포의 hosted zone ID"
   type        = string
 }

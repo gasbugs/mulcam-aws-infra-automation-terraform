@@ -17,8 +17,34 @@ module "cloudfront" {
   bucket_name        = var.bucket_name
   bucket_id          = module.s3.bucket_id
   bucket_domain_name = module.s3.bucket_domain_name
-  bucket_arn         = module.s3.bucket_arn
   index_document     = var.index_document
+  error_document     = var.error_document
+}
+
+# S3 버킷 정책 — CloudFront OAC만 접근 허용
+# CloudFront 모듈과 S3 모듈의 순환 의존성을 피하기 위해 root에서 관리
+resource "aws_s3_bucket_policy" "static_site" {
+  bucket = module.s3.bucket_id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowCloudFrontServicePrincipal"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action   = "s3:GetObject"
+        Resource = "${module.s3.bucket_arn}/*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = module.cloudfront.cloudfront_distribution_arn
+          }
+        }
+      }
+    ]
+  })
 }
 
 # route53_with_ec2 모듈 호출
@@ -28,25 +54,6 @@ module "route53_with_ec2" {
   cloudfront_domain_name    = module.cloudfront.cloudfront_domain_name
   cloudfront_hosted_zone_id = module.cloudfront.cloudfront_hosted_zone_id
 
-  private_dns_name  = var.private_dns_name
-  ami_id            = data.aws_ami.al2023.id
-  instance_type     = var.instance_type
-  pub_key_file_path = var.pub_key_file_path
-}
-
-
-# Amazon Linux 2023 AMI ID를 검색하는 데이터 소스 설정
-data "aws_ami" "al2023" {
-  most_recent = true       # 최신 AMI를 가져오도록 설정
-  owners      = ["amazon"] # AMI 소유자가 Amazon인 것만 필터링
-
-  filter {
-    name   = "name"           # 필터 조건: 이름이 특정 패턴과 일치해야 함
-    values = ["al2023-ami-*"] # Amazon Linux 2023 AMI 이름 패턴과 일치하는 값만 가져옴
-  }
-
-  filter {
-    name   = "architecture" # 필터 조건: 아키텍처가 특정 값과 일치해야 함
-    values = ["x86_64"]     # x86_64 아키텍처 AMI만 가져옴
-  }
+  private_dns_name = var.private_dns_name
+  instance_type    = var.instance_type
 }
