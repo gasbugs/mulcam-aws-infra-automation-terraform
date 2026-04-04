@@ -53,6 +53,13 @@ variable "owner" {
   default     = "TeamA"
 }
 
+# AWS Cost Allocation Tags와 연동하여 부서별 비용 정산(Chargeback)에 사용되는 비용 센터 코드
+variable "cost_center" {
+  description = "비용 센터 코드 (AWS Cost Allocation Tags와 연동하여 부서별 비용 정산에 사용)"
+  type        = string
+  default     = "CC-001"
+}
+
 variable "vpc_cidr" {
   description = "CIDR block for the VPC"
   type        = string

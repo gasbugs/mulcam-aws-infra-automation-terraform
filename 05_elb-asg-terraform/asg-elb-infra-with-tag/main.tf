@@ -4,6 +4,7 @@ locals {
     Project     = var.project
     Environment = var.environment
     Owner       = var.owner
+    CostCenter  = var.cost_center # 부서별 AWS 비용 정산을 위한 Cost Allocation Tag 연동 키
   }
 }
 
@@ -175,7 +176,13 @@ resource "aws_autoscaling_group" "example" {
   tag {
     key                 = "Owner"
     value               = local.common_tags.Owner
-    propagate_at_launch = false # ASG 수준의 책임 소재 표시용이므로 개별 인스턴스에는 전파하지 않음
+    propagate_at_launch = true # 인스턴스 장애 시 담당자를 즉시 파악할 수 있도록 인스턴스에도 전파
+  }
+
+  tag {
+    key                 = "CostCenter"
+    value               = local.common_tags.CostCenter
+    propagate_at_launch = true # Cost Allocation Tags는 EC2 인스턴스 레벨에서 집계되므로 반드시 전파 필요
   }
 }
 
