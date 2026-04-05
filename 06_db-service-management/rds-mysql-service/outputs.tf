@@ -34,3 +34,8 @@ output "public_dns" {
   value       = module.ec2.public_dns
 }
 
+output "ec2_key_pem_path" {
+  description = "SSH 접속용 프라이빗 키 파일 경로 (terraform apply 후 생성됨)"
+  value       = "${path.root}/ec2-key.pem"
+}
+

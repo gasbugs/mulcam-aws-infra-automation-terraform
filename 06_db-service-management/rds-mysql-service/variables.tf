@@ -54,18 +54,32 @@ variable "availability_zones" {
 variable "allowed_cidr" {
   description = "The CIDR block allowed to access the RDS instance"
   type        = string
+
+  # CIDR 형식 유효성 검사 (예: 10.0.0.0/16)
+  validation {
+    condition     = can(cidrhost(var.allowed_cidr, 0))
+    error_message = "allowed_cidr은 유효한 CIDR 형식이어야 합니다 (예: 10.0.0.0/16)."
+  }
 }
 
 variable "db_allocated_storage" {
   description = "The allocated storage size for the RDS instance in GB"
   type        = number
   default     = 20
+
+  validation {
+    condition     = var.db_allocated_storage >= 20 && var.db_allocated_storage <= 65536
+    error_message = "db_allocated_storage는 20 ~ 65536 GB 사이여야 합니다."
+  }
 }
 
 variable "db_engine_version" {
-  description = "The version of the database engine"
+  # null(기본값): data.aws_rds_engine_version.mysql 에서 AWS 기본 최신 버전 자동 조회
+  # 특정 버전 고정: terraform.tfvars 에 db_engine_version = "8.0.36" 처럼 지정
+  # 사용 가능한 버전 목록 확인: aws rds describe-db-engine-versions --engine mysql
+  description = "MySQL 엔진 버전 (null이면 data 소스에서 AWS 기본 최신 버전을 자동 조회)"
   type        = string
-  default     = "8.0.mysql_aurora.3.10.1"
+  default     = null
 }
 
 variable "db_instance_class" {
@@ -91,9 +105,11 @@ variable "db_password" {
 }
 
 variable "db_parameter_group_name" {
-  description = "The name of the DB parameter group"
+  # null(기본값): 엔진 버전에서 자동 결정 (예: MySQL 8.4.x → "default.mysql8.4")
+  # 직접 지정: terraform.tfvars에 db_parameter_group_name = "default.mysql8.0" 처럼 설정
+  description = "DB 파라미터 그룹 이름 (null이면 엔진 버전에 맞게 자동 결정)"
   type        = string
-  default     = "default.mysql8.0"
+  default     = null
 }
 
 variable "db_multi_az" {
@@ -101,7 +117,6 @@ variable "db_multi_az" {
   type        = bool
   default     = false
 }
-
 
 
 #######################################
@@ -117,8 +132,13 @@ variable "instance_name" {
   type        = string
 }
 
-variable "public_key_path" {
-  description = "Key path to access the EC2 instance"
+variable "allowed_ssh_cidr" {
+  description = "SSH 접근을 허용할 CIDR 블록 (0.0.0.0/0은 모든 IP 허용으로 보안에 취약)"
   type        = string
-}
+  default     = "0.0.0.0/0" # 실무에서는 관리자 IP 또는 VPN CIDR로 제한 권장
 
+  validation {
+    condition     = can(cidrhost(var.allowed_ssh_cidr, 0))
+    error_message = "allowed_ssh_cidr은 유효한 CIDR 형식이어야 합니다 (예: 203.0.113.0/24)."
+  }
+}
