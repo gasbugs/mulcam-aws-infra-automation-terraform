@@ -48,3 +48,9 @@ output "public_dns" {
   description = "Public domain of the EC2 instance"
   value       = module.ec2.public_dns
 }
+
+# SSH 접속 시 사용할 프라이빗 키 파일 경로
+output "private_key_path" {
+  description = "Path to the SSH private key file for EC2 access"
+  value       = module.ec2.private_key_path
+}

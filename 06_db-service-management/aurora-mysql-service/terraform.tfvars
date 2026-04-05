@@ -15,9 +15,8 @@ availability_zones = ["us-east-1a", "us-east-1b"]
 
 #######################################
 # EC2에 대한 변수
-instance_type   = "t3.micro"
-instance_name   = "db_client"
-public_key_path = "~/.ssh/my-key.pub"
+instance_type = "t3.micro"
+instance_name = "db_client"
 
 #######################################
 # RDS에 대한 변수
@@ -41,3 +40,9 @@ db_instance_class = "db.r5.xlarge" # 사용하려는 인스턴스 타입 지정
 
 # 접근 허용 CIDR
 allowed_cidr = "10.0.0.0/16"
+
+# Aurora 인스턴스 수 (1=쓰기만, 3=쓰기+읽기+읽기)
+aurora_instance_count = 1
+
+# 백업 보존 기간 (일)
+backup_retention_days = 7

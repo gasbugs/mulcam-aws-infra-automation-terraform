@@ -14,11 +14,6 @@ variable "subnet_id" {
   type        = string
 }
 
-variable "public_key_path" {
-  description = "Key path to access the EC2 instance"
-  type        = string
-}
-
 variable "instance_name" {
   description = "Name tag for the EC2 instance"
   type        = string

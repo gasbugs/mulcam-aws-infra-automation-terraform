@@ -71,11 +71,6 @@ variable "instance_name" {
   type        = string
 }
 
-variable "public_key_path" {
-  description = "Key path to access the EC2 instance"
-  type        = string
-}
-
 #######################################
 # RDS에 대한 변수
 variable "cluster_identifier" {
@@ -111,4 +106,18 @@ variable "db_instance_class" {
 variable "allowed_cidr" {
   description = "The CIDR block allowed to access the RDS instance"
   type        = string
+}
+
+# Aurora 클러스터 인스턴스 수 (1이면 writer만, 3이면 writer 1 + reader 2)
+variable "aurora_instance_count" {
+  description = "Aurora 클러스터에 생성할 인스턴스 수 (1=쓰기만, 3=쓰기+읽기+읽기)"
+  type        = number
+  default     = 1
+}
+
+# 자동 백업을 보존할 기간 (일 단위, 최소 1 ~ 최대 35)
+variable "backup_retention_days" {
+  description = "Aurora 클러스터 백업 보존 기간 (일)"
+  type        = number
+  default     = 7
 }
