@@ -66,6 +66,10 @@ RESOURCE_CHECKS = {
     "Lambda": ('lambda', 'regional', 'list_functions', 'Functions'),
     "SecretManager": ('secretsmanager', 'regional', 'list_secrets', 'SecretList'),
     "RDS": ('rds', 'regional', 'describe_db_instances', 'DBInstances'),
+    # [비용주의] 수동으로 생성된 RDS DB 인스턴스 스냅샷 (자동 스냅샷 제외)
+    "RDS Snapshots": ('rds', 'regional', 'describe_db_snapshots', 'DBSnapshots'),
+    # [비용주의] 수동으로 생성된 Aurora 등 클러스터 스냅샷 (자동 스냅샷 제외)
+    "RDS Cluster Snapshots": ('rds', 'regional', 'describe_db_cluster_snapshots', 'DBClusterSnapshots'),
     "ECS Clusters": ('ecs', 'regional', 'list_clusters', 'clusterArns'),
     "ECR Repos": ('ecr', 'regional', 'describe_repositories', 'repositories'),
     "CodeBuild": ('codebuild', 'regional', 'list_projects', 'projects'),
@@ -177,7 +181,25 @@ def check_single_service(session, resource_name, config, region):
             response = client.describe_snapshots(OwnerIds=['self'])
             if response.get(result_key):
                 return f"{resource_name} 리소스 {len(response[result_key])}개 발견 (리전: {region})"
-        
+
+        # === [필터링] RDS Snapshots (수동 생성 스냅샷만, 자동 백업 제외) ===
+        elif resource_name == 'RDS Snapshots':
+            response = client.describe_db_snapshots(SnapshotType='manual')
+            snapshots = response.get(result_key, [])
+            if snapshots:
+                ids = [s['DBSnapshotIdentifier'] for s in snapshots]
+                return (f"[비용주의] {resource_name} 리소스 {len(snapshots)}개 발견 (리전: {region})"
+                        f" → {', '.join(ids)}")
+
+        # === [필터링] RDS Cluster Snapshots (수동 생성 클러스터 스냅샷만, Aurora 등) ===
+        elif resource_name == 'RDS Cluster Snapshots':
+            response = client.describe_db_cluster_snapshots(SnapshotType='manual')
+            snapshots = response.get(result_key, [])
+            if snapshots:
+                ids = [s['DBClusterSnapshotIdentifier'] for s in snapshots]
+                return (f"[비용주의] {resource_name} 리소스 {len(snapshots)}개 발견 (리전: {region})"
+                        f" → {', '.join(ids)}")
+
         # === [필터링] VPC (non-default) ===
         elif resource_name == 'VPC':
             response = client.describe_vpcs(Filters=[{'Name': 'is-default', 'Values': ['false']}])
@@ -405,6 +427,49 @@ def perform_ebs_snapshot_cleanup(session, log: list, enabled_regions: list) -> d
     return result
 
 
+def perform_rds_snapshot_cleanup(session, log: list, enabled_regions: list) -> dict:
+    """
+    모든 활성화 리전에서 수동으로 생성된 RDS DB 스냅샷과 클러스터 스냅샷을 전부 삭제합니다.
+    자동 백업(automated) 스냅샷은 RDS 인스턴스 삭제 시 함께 제거되므로 여기서는 제외합니다.
+    반환: {"deleted": [...], "failed": [...]}
+    """
+    result = {"deleted": [], "failed": []}
+
+    for region in enabled_regions:
+        try:
+            rds = session.client('rds', region_name=region)
+
+            # 수동 DB 인스턴스 스냅샷 삭제
+            db_snaps = rds.describe_db_snapshots(SnapshotType='manual').get('DBSnapshots', [])
+            for snap in db_snaps:
+                snap_id = snap['DBSnapshotIdentifier']
+                try:
+                    rds.delete_db_snapshot(DBSnapshotIdentifier=snap_id)
+                    log.append(f"  [RDS 스냅샷 정리] DB 스냅샷 삭제 완료: {snap_id} (리전: {region})")
+                    result["deleted"].append(snap_id)
+                except ClientError as e:
+                    log.append(f"  [RDS 스냅샷 정리] DB 스냅샷 삭제 실패 ({snap_id}): {e}")
+                    result["failed"].append(snap_id)
+
+            # 수동 클러스터 스냅샷 삭제 (Aurora 등 Multi-AZ 클러스터 포함)
+            cluster_snaps = rds.describe_db_cluster_snapshots(SnapshotType='manual').get('DBClusterSnapshots', [])
+            for snap in cluster_snaps:
+                snap_id = snap['DBClusterSnapshotIdentifier']
+                try:
+                    rds.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=snap_id)
+                    log.append(f"  [RDS 스냅샷 정리] 클러스터 스냅샷 삭제 완료: {snap_id} (리전: {region})")
+                    result["deleted"].append(snap_id)
+                except ClientError as e:
+                    log.append(f"  [RDS 스냅샷 정리] 클러스터 스냅샷 삭제 실패 ({snap_id}): {e}")
+                    result["failed"].append(snap_id)
+
+        except (ClientError, BotoCoreError):
+            # 비활성 리전이거나 권한 없는 경우 무시
+            pass
+
+    return result
+
+
 def perform_cloudfront_cleanup(session, log: list) -> dict:
     """
     CloudFront 배포를 정리합니다.
@@ -567,11 +632,12 @@ def perform_vpc_cleanup(session, log: list, enabled_regions: list) -> dict:
 def _empty_cleanups() -> dict:
     """delete_mode=False 일 때 record_result 에 채워 넣을 빈 정리 결과"""
     return {
-        "iam_cleanup":  {},
-        "cf_cleanup":   {},
-        "ami_cleanup":  {},
-        "snap_cleanup": {},
-        "vpc_cleanup":  {},
+        "iam_cleanup":      {},
+        "cf_cleanup":       {},
+        "ami_cleanup":      {},
+        "snap_cleanup":     {},
+        "rds_snap_cleanup": {},
+        "vpc_cleanup":      {},
     }
 
 
@@ -649,12 +715,15 @@ def check_aws_account(access_key, secret_key, account_name, delete_mode: bool = 
         # EBS 스냅샷 정리 (AMI 해지 후 실행해야 InUse 오류 없이 삭제 가능)
         snap_cleanup = perform_ebs_snapshot_cleanup(session, log, enabled_regions)
 
+        # RDS 스냅샷 정리 (수동 생성 DB 스냅샷 및 클러스터 스냅샷)
+        rds_snap_cleanup = perform_rds_snapshot_cleanup(session, log, enabled_regions)
+
         # VPC 정리 — 다른 리소스가 모두 제거된 후 마지막에 실행
         # (EC2, ELB, RDS 등 VPC 종속 리소스가 남아 있으면 삭제 실패)
         vpc_cleanup = perform_vpc_cleanup(session, log, enabled_regions)
     else:
         # audit 모드: 정리 없이 빈 결과로 초기화
-        iam_cleanup = cf_cleanup = ami_cleanup = snap_cleanup = vpc_cleanup = {}
+        iam_cleanup = cf_cleanup = ami_cleanup = snap_cleanup = rds_snap_cleanup = vpc_cleanup = {}
     # ────────────────────────────────────────────────────────────────────────────
 
     # 결과 집계
@@ -673,6 +742,10 @@ def check_aws_account(access_key, secret_key, account_name, delete_mode: bool = 
         if "AMI" in w and not ami_cleanup.get("failed"):
             return True
         if "EBS Snapshots" in w and not snap_cleanup.get("failed"):
+            return True
+        if "RDS Snapshots" in w and not rds_snap_cleanup.get("failed"):
+            return True
+        if "RDS Cluster Snapshots" in w and not rds_snap_cleanup.get("failed"):
             return True
         if "VPC" in w and not vpc_cleanup.get("failed"):
             return True
@@ -698,7 +771,7 @@ def check_aws_account(access_key, secret_key, account_name, delete_mode: bool = 
                    "status": status, "warnings": list(set(remaining_warnings)),
                    "cf_cleanup": cf_cleanup, "iam_cleanup": iam_cleanup,
                    "ami_cleanup": ami_cleanup, "snap_cleanup": snap_cleanup,
-                   "vpc_cleanup": vpc_cleanup})
+                   "rds_snap_cleanup": rds_snap_cleanup, "vpc_cleanup": vpc_cleanup})
 
 
 def print_summary(total: int, delete_mode: bool = False):
@@ -740,6 +813,10 @@ def print_summary(total: int, delete_mode: bool = False):
         snap_deleted = sum(len(r["snap_cleanup"].get("deleted", [])) for r in _results)
         snap_failed  = sum(len(r["snap_cleanup"].get("failed",  [])) for r in _results)
 
+        # RDS 스냅샷 정리 집계 (DB 인스턴스 + 클러스터 스냅샷 합산)
+        rds_snap_deleted = sum(len(r["rds_snap_cleanup"].get("deleted", [])) for r in _results)
+        rds_snap_failed  = sum(len(r["rds_snap_cleanup"].get("failed",  [])) for r in _results)
+
         if iam_deleted or iam_failed:
             lines += [
                 f"  ─────────────────────────────────────",
@@ -766,6 +843,15 @@ def print_summary(total: int, delete_mode: bool = False):
             ]
             if snap_failed:
                 lines.append(f"    · 삭제 실패          : {snap_failed}개")
+
+        if rds_snap_deleted or rds_snap_failed:
+            lines += [
+                f"  ─────────────────────────────────────",
+                f"  RDS 스냅샷 정리 현황 (DB 인스턴스 + 클러스터)",
+                f"    · 삭제 완료          : {rds_snap_deleted}개",
+            ]
+            if rds_snap_failed:
+                lines.append(f"    · 삭제 실패          : {rds_snap_failed}개")
 
         # VPC 정리 집계
         vpc_deleted = sum(len(r["vpc_cleanup"].get("deleted", [])) for r in _results)
