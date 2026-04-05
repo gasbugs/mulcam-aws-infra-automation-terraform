@@ -15,8 +15,3 @@ instance_type    = "t3.micro"
 desired_capacity = 2
 max_size         = 4
 min_size         = 1
-
-# certs
-private_key_file_path      = "./certs/private-key.pem"
-certificate_body_file_path = "./certs/certificate.pem"
-# certificate_chain_file_path= ""
