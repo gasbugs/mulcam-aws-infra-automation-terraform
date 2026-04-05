@@ -228,6 +228,15 @@ def parse_args() -> argparse.Namespace:
         help="액세스 키 파일 경로 (기본값: accesskey.txt)",
         metavar="FILE",
     )
+    parser.add_argument(
+        "--id",
+        type=int,
+        default=None,
+        # 1-based 순번으로 특정 계정만 검사합니다. 예: --id 3 → accesskey.txt의 3번째 계정만 처리
+        help="검사할 계정 순번 (1부터 시작). 생략하면 전체 계정을 대상으로 합니다.",
+        metavar="N",
+        dest="account_id",
+    )
     return parser.parse_args()
 
 
@@ -460,6 +469,101 @@ def perform_cloudfront_cleanup(session, log: list) -> dict:
     return result
 
 
+def perform_vpc_cleanup(session, log: list, enabled_regions: list) -> dict:
+    """
+    모든 활성화 리전에서 기본 VPC(default VPC)를 제외한 나머지 VPC를 삭제합니다.
+    VPC는 종속 리소스(IGW, 서브넷, 라우트 테이블, 보안 그룹, 엔드포인트 등)를
+    먼저 정리해야 삭제할 수 있으므로, 반드시 다른 리소스 정리 이후 마지막에 실행합니다.
+    반환: {"deleted": [...], "failed": [...]}
+    """
+    result = {"deleted": [], "failed": []}
+
+    for region in enabled_regions:
+        try:
+            ec2 = session.client('ec2', region_name=region)
+
+            # 기본 VPC가 아닌 VPC만 조회
+            vpcs = ec2.describe_vpcs(
+                Filters=[{'Name': 'is-default', 'Values': ['false']}]
+            ).get('Vpcs', [])
+
+            for vpc in vpcs:
+                vpc_id = vpc['VpcId']
+                try:
+                    # 1단계: 인터넷 게이트웨이(IGW) 분리 후 삭제
+                    #        VPC에 연결된 IGW가 있으면 VPC 삭제 불가
+                    igws = ec2.describe_internet_gateways(
+                        Filters=[{'Name': 'attachment.vpc-id', 'Values': [vpc_id]}]
+                    ).get('InternetGateways', [])
+                    for igw in igws:
+                        igw_id = igw['InternetGatewayId']
+                        ec2.detach_internet_gateway(InternetGatewayId=igw_id, VpcId=vpc_id)
+                        ec2.delete_internet_gateway(InternetGatewayId=igw_id)
+                        log.append(f"  [VPC 정리] IGW 삭제: {igw_id} (VPC: {vpc_id}, 리전: {region})")
+
+                    # 2단계: VPC 엔드포인트 삭제
+                    #        엔드포인트가 남아 있으면 서브넷 삭제 시 오류 발생 가능
+                    endpoints = ec2.describe_vpc_endpoints(
+                        Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]},
+                                 {'Name': 'vpc-endpoint-state', 'Values': ['available', 'pending']}]
+                    ).get('VpcEndpoints', [])
+                    if endpoints:
+                        ep_ids = [ep['VpcEndpointId'] for ep in endpoints]
+                        ec2.delete_vpc_endpoints(VpcEndpointIds=ep_ids)
+                        log.append(f"  [VPC 정리] 엔드포인트 삭제: {ep_ids} (VPC: {vpc_id})")
+
+                    # 3단계: 서브넷 삭제
+                    subnets = ec2.describe_subnets(
+                        Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}]
+                    ).get('Subnets', [])
+                    for subnet in subnets:
+                        ec2.delete_subnet(SubnetId=subnet['SubnetId'])
+                        log.append(f"  [VPC 정리] 서브넷 삭제: {subnet['SubnetId']} (VPC: {vpc_id})")
+
+                    # 4단계: 메인 라우트 테이블을 제외한 나머지 라우트 테이블 삭제
+                    rts = ec2.describe_route_tables(
+                        Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}]
+                    ).get('RouteTables', [])
+                    for rt in rts:
+                        # 메인 라우트 테이블은 VPC와 함께 자동 삭제되므로 건너뜀
+                        is_main = any(
+                            assoc.get('Main') for assoc in rt.get('Associations', [])
+                        )
+                        if not is_main:
+                            ec2.delete_route_table(RouteTableId=rt['RouteTableId'])
+                            log.append(f"  [VPC 정리] 라우트 테이블 삭제: {rt['RouteTableId']} (VPC: {vpc_id})")
+
+                    # 5단계: 기본 보안 그룹을 제외한 나머지 보안 그룹 삭제
+                    sgs = ec2.describe_security_groups(
+                        Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}]
+                    ).get('SecurityGroups', [])
+                    for sg in sgs:
+                        # 'default' 보안 그룹은 VPC와 함께 자동 삭제되므로 건너뜀
+                        if sg['GroupName'] == 'default':
+                            continue
+                        try:
+                            ec2.delete_security_group(GroupId=sg['GroupId'])
+                            log.append(f"  [VPC 정리] 보안 그룹 삭제: {sg['GroupId']} (VPC: {vpc_id})")
+                        except ClientError:
+                            # 다른 리소스가 참조 중이면 무시 (VPC 삭제 시 함께 제거됨)
+                            pass
+
+                    # 6단계: VPC 자체 삭제
+                    ec2.delete_vpc(VpcId=vpc_id)
+                    log.append(f"  [VPC 정리] VPC 삭제 완료: {vpc_id} (리전: {region})")
+                    result["deleted"].append(vpc_id)
+
+                except ClientError as e:
+                    log.append(f"  [VPC 정리] VPC 삭제 실패 ({vpc_id}, 리전: {region}): {e}")
+                    result["failed"].append(vpc_id)
+
+        except (ClientError, BotoCoreError):
+            # 비활성 리전이거나 권한 없는 경우 무시
+            pass
+
+    return result
+
+
 def _empty_cleanups() -> dict:
     """delete_mode=False 일 때 record_result 에 채워 넣을 빈 정리 결과"""
     return {
@@ -467,6 +571,7 @@ def _empty_cleanups() -> dict:
         "cf_cleanup":   {},
         "ami_cleanup":  {},
         "snap_cleanup": {},
+        "vpc_cleanup":  {},
     }
 
 
@@ -543,9 +648,13 @@ def check_aws_account(access_key, secret_key, account_name, delete_mode: bool = 
 
         # EBS 스냅샷 정리 (AMI 해지 후 실행해야 InUse 오류 없이 삭제 가능)
         snap_cleanup = perform_ebs_snapshot_cleanup(session, log, enabled_regions)
+
+        # VPC 정리 — 다른 리소스가 모두 제거된 후 마지막에 실행
+        # (EC2, ELB, RDS 등 VPC 종속 리소스가 남아 있으면 삭제 실패)
+        vpc_cleanup = perform_vpc_cleanup(session, log, enabled_regions)
     else:
         # audit 모드: 정리 없이 빈 결과로 초기화
-        iam_cleanup = cf_cleanup = ami_cleanup = snap_cleanup = {}
+        iam_cleanup = cf_cleanup = ami_cleanup = snap_cleanup = vpc_cleanup = {}
     # ────────────────────────────────────────────────────────────────────────────
 
     # 결과 집계
@@ -564,6 +673,8 @@ def check_aws_account(access_key, secret_key, account_name, delete_mode: bool = 
         if "AMI" in w and not ami_cleanup.get("failed"):
             return True
         if "EBS Snapshots" in w and not snap_cleanup.get("failed"):
+            return True
+        if "VPC" in w and not vpc_cleanup.get("failed"):
             return True
         return False
 
@@ -586,7 +697,8 @@ def check_aws_account(access_key, secret_key, account_name, delete_mode: bool = 
     record_result({"account_name": account_name, "account_id": account_id,
                    "status": status, "warnings": list(set(remaining_warnings)),
                    "cf_cleanup": cf_cleanup, "iam_cleanup": iam_cleanup,
-                   "ami_cleanup": ami_cleanup, "snap_cleanup": snap_cleanup})
+                   "ami_cleanup": ami_cleanup, "snap_cleanup": snap_cleanup,
+                   "vpc_cleanup": vpc_cleanup})
 
 
 def print_summary(total: int, delete_mode: bool = False):
@@ -654,6 +766,19 @@ def print_summary(total: int, delete_mode: bool = False):
             ]
             if snap_failed:
                 lines.append(f"    · 삭제 실패          : {snap_failed}개")
+
+        # VPC 정리 집계
+        vpc_deleted = sum(len(r["vpc_cleanup"].get("deleted", [])) for r in _results)
+        vpc_failed  = sum(len(r["vpc_cleanup"].get("failed",  [])) for r in _results)
+
+        if vpc_deleted or vpc_failed:
+            lines += [
+                f"  ─────────────────────────────────────",
+                f"  VPC 정리 현황 (비기본 VPC, 마지막 단계)",
+                f"    · 삭제 완료          : {vpc_deleted}개",
+            ]
+            if vpc_failed:
+                lines.append(f"    · 삭제 실패          : {vpc_failed}개  (종속 리소스 잔존 가능성)")
 
         if cf_deleted or cf_disabled or cf_failed or cf_skipped:
             lines += [
@@ -733,6 +858,15 @@ def main():
     if not creds:
         print("검사할 계정 정보가 없습니다. accesskey.txt 파일을 확인하세요.")
         return
+
+    # --id 가 지정된 경우 해당 순번(1-based)의 계정만 추출
+    if args.account_id is not None:
+        idx = args.account_id
+        if idx < 1 or idx > len(creds):
+            print(f"오류: --id {idx} 는 유효하지 않습니다. 계정 수: {len(creds)}개 (1~{len(creds)})")
+            return
+        creds = [creds[idx - 1]]
+        print(f"  ※ --id {idx} 모드: {creds[0][2]}만 검사합니다.")
 
     print(f"총 {len(creds)}개의 계정을 병렬로 검사합니다. (계정별 결과는 완료 순으로 출력)")
 
