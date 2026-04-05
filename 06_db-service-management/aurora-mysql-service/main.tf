@@ -84,57 +84,17 @@ resource "aws_rds_cluster" "my_aurora_cluster" {
 
 # Aurora 클러스터 인스턴스 — count=3이면 첫 번째가 writer, 나머지가 reader 역할을 맡음 (쓰기, 읽기, 읽기)
 resource "aws_rds_cluster_instance" "my_aurora_instance" {
-  count              = var.aurora_instance_count                                        # 인스턴스 수 (예: 1=쓰기만, 3=쓰기+읽기+읽기)
-  identifier         = "${var.cluster_identifier}-instance-${count.index + 1}"         # 인스턴스 고유 이름
-  cluster_identifier = aws_rds_cluster.my_aurora_cluster.id                            # 속할 클러스터 ID
-  instance_class     = var.db_instance_class                                           # 인스턴스 클래스
-  engine             = "aurora-mysql"                                                  # 엔진 (Aurora MySQL)
-  engine_version     = var.db_engine_version                                           # 엔진 버전
-  publicly_accessible = false                                                          # 퍼블릭 액세스 비활성화
-  apply_immediately  = true                                                            # 업데이트 즉시 적용
+  count               = var.aurora_instance_count                               # 인스턴스 수 (예: 1=쓰기만, 3=쓰기+읽기+읽기)
+  identifier          = "${var.cluster_identifier}-instance-${count.index + 1}" # 인스턴스 고유 이름
+  cluster_identifier  = aws_rds_cluster.my_aurora_cluster.id                    # 속할 클러스터 ID
+  instance_class      = var.db_instance_class                                   # 인스턴스 클래스
+  engine              = "aurora-mysql"                                          # 엔진 (Aurora MySQL)
+  engine_version      = var.db_engine_version                                   # 엔진 버전
+  publicly_accessible = false                                                   # 퍼블릭 액세스 비활성화
+  apply_immediately   = true                                                    # 업데이트 즉시 적용
 
   tags = {
     Name        = "${var.cluster_identifier}-instance-${count.index + 1}" # 인스턴스 이름 태그
-    Environment = var.environment                                          # 환경 태그
+    Environment = var.environment                                         # 환경 태그
   }
 }
-
-/*
-# 주석 처리된 예제 코드 (참고용)
-
-resource "aws_rds_cluster" "my_aurora_cluster" {
-  cluster_identifier      = "my-aurora-cluster"          # 클러스터 ID
-  engine                  = "aurora-mysql"               # 엔진 종류 (MySQL 호환 Aurora)
-  engine_version          = "8.0.mysql_aurora.3.10.1"    # 엔진 버전
-  master_username         = "admin"                      # 관리자 계정 이름
-  master_password         = "YourPassword123!"           # 관리자 비밀번호
-  db_subnet_group_name    = aws_db_subnet_group.my_db_subnet_group.name # DB 서브넷 그룹 이름
-  vpc_security_group_ids  = [aws_security_group.rds_sg.id] # VPC 보안 그룹 ID
-  skip_final_snapshot     = true                         # 삭제 시 최종 스냅샷 생성 여부
-  backup_retention_period = 7                            # 백업 보존 기간 (일)
-  preferred_backup_window = "07:00-09:00"                # 백업 시간 (UTC 기준)
-  storage_encrypted       = true                         # 스토리지 암호화 여부
-  preferred_maintenance_window = "mon:03:00-mon:04:00"   # 유지 관리 창 (UTC 기준)
-  deletion_protection          = true                    # 삭제 보호 활성화
-
-  tags = {
-    Name        = "My-Aurora-Cluster"                    # 클러스터 이름 태그
-    Environment = "Production"                           # 환경 태그
-  }
-}
-
-resource "aws_rds_cluster_instance" "my_aurora_instance" {
-  cluster_identifier           = aws_rds_cluster.my_aurora_cluster.id # 클러스터 ID
-  instance_class               = "db.r5.large"                # 인스턴스 클래스
-  engine                       = "aurora-mysql"               # 엔진 (Aurora MySQL)
-  db_subnet_group_name         = aws_db_subnet_group.my_db_subnet_group.name # DB 서브넷 그룹 이름
-  publicly_accessible          = false                       # 퍼블릭 액세스 비활성화
-  monitoring_interval          = 60                          # 모니터링 간격 (초)
-  performance_insights_enabled = true                        # 성능 통찰력 활성화
-
-  tags = {
-    Name        = "My-Aurora-Instance"                      # 인스턴스 이름 태그
-    Environment = "Production"                             # 환경 태그
-  }
-}
-*/
