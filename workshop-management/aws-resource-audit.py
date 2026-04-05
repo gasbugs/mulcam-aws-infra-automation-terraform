@@ -1,14 +1,17 @@
 # =============================================================================
 # aws-resource-audit.py
-# [용도] 워크샵 수강생 AWS 계정의 잔여 리소스 감사 스크립트
+# [용도] 워크샵 수강생 AWS 계정의 잔여 리소스 감사 및 정리 스크립트
 #
 # accesskey.txt 에 등록된 모든 계정을 병렬로 스캔하여
 # 삭제되지 않고 남아있는 AWS 리소스(EC2, RDS, EKS, Route53, WAF 등)를
 # 계정별로 출력합니다. 비용이 발생할 수 있는 리소스는 [비용주의] 로 표시됩니다.
 #
 # [사전 준비] accesskey.txt — 탭으로 구분된 access_key, secret_key (계정당 1줄)
-# [실행 방법] python aws-resource-audit.py
+# [실행 방법]
+#   감사만 (기본값) : python aws-resource-audit.py
+#   감사 + 삭제    : python aws-resource-audit.py --delete
 # =============================================================================
+import argparse
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError, BotoCoreError
 import sys
@@ -204,6 +207,29 @@ def check_single_service(session, resource_name, config, region):
     return None # 발견된 리소스 없음
 
 # ------------------------------------
+
+def parse_args() -> argparse.Namespace:
+    """CLI 인수를 파싱합니다."""
+    parser = argparse.ArgumentParser(
+        description="워크샵 수강생 AWS 계정 리소스 감사 및 정리 스크립트"
+    )
+    parser.add_argument(
+        "--delete",
+        action="store_true",
+        default=False,
+        # 이 플래그를 주면 감사 후 리소스를 실제로 삭제합니다.
+        # 지정하지 않으면 감사(탐지·보고)만 수행합니다.
+        help="발견된 리소스를 삭제합니다. 기본값: 감사만 수행",
+    )
+    parser.add_argument(
+        "--key-file",
+        default="accesskey.txt",
+        # 기본값과 다른 경로의 키 파일을 사용할 때 지정합니다.
+        help="액세스 키 파일 경로 (기본값: accesskey.txt)",
+        metavar="FILE",
+    )
+    return parser.parse_args()
+
 
 def parse_credentials(file_path='accesskey.txt'):
     """accesskey.txt 파일을 파싱하여 (key, secret) 튜플 리스트를 반환"""
@@ -434,8 +460,18 @@ def perform_cloudfront_cleanup(session, log: list) -> dict:
     return result
 
 
-def check_aws_account(access_key, secret_key, account_name):
-    """단일 AWS 계정의 리소스를 병렬로 검사하고 CloudFront를 정리한 뒤 결과를 출력"""
+def _empty_cleanups() -> dict:
+    """delete_mode=False 일 때 record_result 에 채워 넣을 빈 정리 결과"""
+    return {
+        "iam_cleanup":  {},
+        "cf_cleanup":   {},
+        "ami_cleanup":  {},
+        "snap_cleanup": {},
+    }
+
+
+def check_aws_account(access_key, secret_key, account_name, delete_mode: bool = False):
+    """단일 AWS 계정의 리소스를 병렬로 검사하고, delete_mode=True 이면 정리까지 수행합니다."""
     log = [f"", f"{'='*60}", f"  [{account_name} / Key: {access_key[:5]}...] 계정 검사 시작"]
 
     try:
@@ -449,7 +485,7 @@ def check_aws_account(access_key, secret_key, account_name):
         log.append(f"{'='*60}")
         flush_log(log)
         record_result({"account_name": account_name, "account_id": None,
-                       "status": "error", "warnings": [], "cf_cleanup": {}, "iam_cleanup": {}})
+                       "status": "error", "warnings": [], **_empty_cleanups()})
         return
 
     # 계정 ID 조회
@@ -466,7 +502,7 @@ def check_aws_account(access_key, secret_key, account_name):
         log.append(f"{'='*60}")
         flush_log(log)
         record_result({"account_name": account_name, "account_id": account_id,
-                       "status": "error", "warnings": [], "cf_cleanup": {}, "iam_cleanup": {}})
+                       "status": "error", "warnings": [], **_empty_cleanups()})
         return
 
     warnings_found = []
@@ -494,32 +530,40 @@ def check_aws_account(access_key, secret_key, account_name):
             except Exception as e:
                 errors_found.append(f"  [오류] 개별 서비스 검사 중 에러: {e}")
 
-    # IAM 사용자 정리 (예약 유저 제외 전부 삭제)
-    iam_cleanup = perform_iam_user_cleanup(session, log)
+    # ── DELETE 단계: --delete 플래그가 있을 때만 실행 ──────────────────────────
+    if delete_mode:
+        # IAM 사용자 정리 (예약 유저 제외 전부 삭제)
+        iam_cleanup = perform_iam_user_cleanup(session, log)
 
-    # CloudFront 정리 (비활성화된 것 삭제, 활성화된 것 비활성화)
-    cf_cleanup = perform_cloudfront_cleanup(session, log)
+        # CloudFront 정리 (비활성화된 것 삭제, 활성화된 것 비활성화)
+        cf_cleanup = perform_cloudfront_cleanup(session, log)
 
-    # AMI 해지 (자기 소유 전부 해지) — 스냅샷보다 먼저 실행해야 참조 해제됨
-    ami_cleanup = perform_ami_cleanup(session, log, enabled_regions)
+        # AMI 해지 (자기 소유 전부 해지) — 스냅샷보다 먼저 실행해야 참조 해제됨
+        ami_cleanup = perform_ami_cleanup(session, log, enabled_regions)
 
-    # EBS 스냅샷 정리 (AMI 해지 후 실행해야 InUse 오류 없이 삭제 가능)
-    snap_cleanup = perform_ebs_snapshot_cleanup(session, log, enabled_regions)
+        # EBS 스냅샷 정리 (AMI 해지 후 실행해야 InUse 오류 없이 삭제 가능)
+        snap_cleanup = perform_ebs_snapshot_cleanup(session, log, enabled_regions)
+    else:
+        # audit 모드: 정리 없이 빈 결과로 초기화
+        iam_cleanup = cf_cleanup = ami_cleanup = snap_cleanup = {}
+    # ────────────────────────────────────────────────────────────────────────────
 
     # 결과 집계
     if errors_found:
         for e in errors_found:
             log.append(e)
 
-    # 정리된 리소스는 잔여로 보지 않음
+    # delete_mode 일 때만 정리된 항목을 잔여 경고에서 제외
     def _is_cleaned(w: str) -> bool:
-        if "CloudFront" in w and not cf_cleanup["skipped"] and not cf_cleanup["failed"]:
+        if not delete_mode:
+            return False
+        if "CloudFront" in w and not cf_cleanup.get("skipped") and not cf_cleanup.get("failed"):
             return True
-        if "IAM 사용자" in w and not iam_cleanup["failed"]:
+        if "IAM 사용자" in w and not iam_cleanup.get("failed"):
             return True
-        if "AMI" in w and not ami_cleanup["failed"]:
+        if "AMI" in w and not ami_cleanup.get("failed"):
             return True
-        if "EBS Snapshots" in w and not snap_cleanup["failed"]:
+        if "EBS Snapshots" in w and not snap_cleanup.get("failed"):
             return True
         return False
 
@@ -545,34 +589,18 @@ def check_aws_account(access_key, secret_key, account_name):
                    "ami_cleanup": ami_cleanup, "snap_cleanup": snap_cleanup})
 
 
-def print_summary(total: int):
-    """전체 감사 결과 요약을 출력합니다."""
+def print_summary(total: int, delete_mode: bool = False):
+    """전체 감사(및 정리) 결과 요약을 출력합니다."""
     clean       = [r for r in _results if r["status"] == "clean"]
     has_res     = [r for r in _results if r["status"] == "has_resources"]
     errors      = [r for r in _results if r["status"] == "error"]
 
-    # CloudFront 정리 집계
-    cf_deleted  = sum(len(r["cf_cleanup"].get("deleted",  [])) for r in _results)
-    cf_disabled = sum(len(r["cf_cleanup"].get("disabled", [])) for r in _results)
-    cf_failed   = sum(len(r["cf_cleanup"].get("failed",   [])) for r in _results)
-    cf_skipped  = sum(len(r["cf_cleanup"].get("skipped",  [])) for r in _results)
-
-    # IAM 정리 집계
-    iam_deleted = sum(len(r["iam_cleanup"].get("deleted", [])) for r in _results)
-    iam_failed  = sum(len(r["iam_cleanup"].get("failed",  [])) for r in _results)
-
-    # AMI 정리 집계
-    ami_deregistered = sum(len(r["ami_cleanup"].get("deregistered", [])) for r in _results)
-    ami_failed       = sum(len(r["ami_cleanup"].get("failed",       [])) for r in _results)
-
-    # EBS 스냅샷 정리 집계
-    snap_deleted = sum(len(r["snap_cleanup"].get("deleted", [])) for r in _results)
-    snap_failed  = sum(len(r["snap_cleanup"].get("failed",  [])) for r in _results)
-
+    # 헤더: 실행 모드에 따라 다르게 표시
+    mode_label = "감사 + 정리" if delete_mode else "감사"
     lines = [
         "",
         "=" * 60,
-        "  [최종 감사 요약]",
+        f"  [최종 {mode_label} 요약]",
         "=" * 60,
         f"  전체 계정 수          : {total}개",
         f"  깨끗한 계정           : {len(clean)}개",
@@ -580,42 +608,62 @@ def print_summary(total: int):
         f"  검사 오류             : {len(errors)}개",
     ]
 
-    if iam_deleted or iam_failed:
-        lines += [
-            f"  ─────────────────────────────────────",
-            f"  IAM 사용자 정리 현황",
-            f"    · 삭제 완료          : {iam_deleted}명",
-        ]
-        if iam_failed:
-            lines.append(f"    · 삭제 실패          : {iam_failed}명")
+    # 정리 통계는 delete_mode 일 때만 출력
+    if delete_mode:
+        # CloudFront 정리 집계
+        cf_deleted  = sum(len(r["cf_cleanup"].get("deleted",  [])) for r in _results)
+        cf_disabled = sum(len(r["cf_cleanup"].get("disabled", [])) for r in _results)
+        cf_failed   = sum(len(r["cf_cleanup"].get("failed",   [])) for r in _results)
+        cf_skipped  = sum(len(r["cf_cleanup"].get("skipped",  [])) for r in _results)
 
-    if ami_deregistered or ami_failed:
-        lines += [
-            f"  ─────────────────────────────────────",
-            f"  AMI 정리 현황",
-            f"    · 해지 완료          : {ami_deregistered}개",
-        ]
-        if ami_failed:
-            lines.append(f"    · 해지 실패          : {ami_failed}개")
+        # IAM 정리 집계
+        iam_deleted = sum(len(r["iam_cleanup"].get("deleted", [])) for r in _results)
+        iam_failed  = sum(len(r["iam_cleanup"].get("failed",  [])) for r in _results)
 
-    if snap_deleted or snap_failed:
-        lines += [
-            f"  ─────────────────────────────────────",
-            f"  EBS 스냅샷 정리 현황",
-            f"    · 삭제 완료          : {snap_deleted}개",
-        ]
-        if snap_failed:
-            lines.append(f"    · 삭제 실패          : {snap_failed}개")
+        # AMI 정리 집계
+        ami_deregistered = sum(len(r["ami_cleanup"].get("deregistered", [])) for r in _results)
+        ami_failed       = sum(len(r["ami_cleanup"].get("failed",       [])) for r in _results)
 
-    if cf_deleted or cf_disabled or cf_failed or cf_skipped:
-        lines += [
-            f"  ─────────────────────────────────────",
-            f"  CloudFront 정리 현황",
-            f"    · 삭제 완료          : {cf_deleted}개",
-            f"    · 비활성화 요청      : {cf_disabled}개  (재실행 시 삭제 예정)",
-            f"    · 삭제/비활성화 실패 : {cf_failed}개",
-            f"    · 배포 중 스킵       : {cf_skipped}개",
-        ]
+        # EBS 스냅샷 정리 집계
+        snap_deleted = sum(len(r["snap_cleanup"].get("deleted", [])) for r in _results)
+        snap_failed  = sum(len(r["snap_cleanup"].get("failed",  [])) for r in _results)
+
+        if iam_deleted or iam_failed:
+            lines += [
+                f"  ─────────────────────────────────────",
+                f"  IAM 사용자 정리 현황",
+                f"    · 삭제 완료          : {iam_deleted}명",
+            ]
+            if iam_failed:
+                lines.append(f"    · 삭제 실패          : {iam_failed}명")
+
+        if ami_deregistered or ami_failed:
+            lines += [
+                f"  ─────────────────────────────────────",
+                f"  AMI 정리 현황",
+                f"    · 해지 완료          : {ami_deregistered}개",
+            ]
+            if ami_failed:
+                lines.append(f"    · 해지 실패          : {ami_failed}개")
+
+        if snap_deleted or snap_failed:
+            lines += [
+                f"  ─────────────────────────────────────",
+                f"  EBS 스냅샷 정리 현황",
+                f"    · 삭제 완료          : {snap_deleted}개",
+            ]
+            if snap_failed:
+                lines.append(f"    · 삭제 실패          : {snap_failed}개")
+
+        if cf_deleted or cf_disabled or cf_failed or cf_skipped:
+            lines += [
+                f"  ─────────────────────────────────────",
+                f"  CloudFront 정리 현황",
+                f"    · 삭제 완료          : {cf_deleted}개",
+                f"    · 비활성화 요청      : {cf_disabled}개  (재실행 시 삭제 예정)",
+                f"    · 삭제/비활성화 실패 : {cf_failed}개",
+                f"    · 배포 중 스킵       : {cf_skipped}개",
+            ]
 
     # 잔여 리소스 계정 목록 — 계정 번호 오름차순
     if has_res:
@@ -660,13 +708,28 @@ def print_summary(total: int):
             lines.append(f"  {r['account_name']:<10}  계정 ID: {aid}")
 
     lines.append("=" * 60)
+
+    # audit 모드일 때 delete 모드 안내 문구 출력
+    if not delete_mode:
+        lines += [
+            "",
+            "  ※ 리소스를 삭제하려면 --delete 옵션을 추가해 재실행하세요.",
+            "     예시: python aws-resource-audit.py --delete",
+        ]
+
     print("\n".join(lines))
 
 
 def main():
-    print("AWS 수강생 계정 리소스 감사 스크립트 시작...")
+    args = parse_args()
+    delete_mode = args.delete
 
-    creds = parse_credentials()
+    mode_label = "감사 + 삭제" if delete_mode else "감사"
+    print(f"AWS 수강생 계정 리소스 {mode_label} 스크립트 시작...")
+    if delete_mode:
+        print("  ※ --delete 모드: 발견된 리소스를 실제로 삭제합니다.")
+
+    creds = parse_credentials(file_path=args.key_file)
     if not creds:
         print("검사할 계정 정보가 없습니다. accesskey.txt 파일을 확인하세요.")
         return
@@ -675,7 +738,7 @@ def main():
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = {
-            executor.submit(check_aws_account, ak, sk, name): name
+            executor.submit(check_aws_account, ak, sk, name, delete_mode): name
             for ak, sk, name in creds
         }
         for future in concurrent.futures.as_completed(futures):
@@ -685,7 +748,7 @@ def main():
                 with _print_lock:
                     print(f"[오류] {futures[future]} 처리 중 예외 발생: {e}", flush=True)
 
-    print_summary(len(creds))
+    print_summary(len(creds), delete_mode=delete_mode)
     print("\n모든 계정 검사 완료.")
 
 if __name__ == "__main__":
