@@ -1,5 +1,4 @@
-# AWS 설정 관련 변수
-# AWS에서 리소스를 배포할 리전을 지정하는 변수 (예: ap-northeast-2)
+# AWS에서 리소스를 배포할 리전을 지정하는 변수 (예: us-east-1)
 variable "aws_region" {
   description = "AWS 리전"
   type        = string
@@ -11,9 +10,9 @@ variable "aws_profile" {
   type        = string
 }
 
-# EC2 인스턴스의 소유자 또는 담당 팀을 나타내는 변수
+# 리소스에 공통으로 적용할 소유자 태그
 variable "owner" {
-  description = "Owner of the EC2 instance"
+  description = "리소스 소유자 또는 담당 팀"
   type        = string
   default     = "TeamA"
 }
@@ -27,87 +26,67 @@ variable "environment" {
 
 #######################################
 # VPC에 대한 변수
+
 variable "vpc_name" {
-  description = "The name of the VPC"
+  description = "VPC의 이름"
   type        = string
   default     = "my-vpc"
 }
 
 variable "vpc_cidr" {
-  description = "The CIDR block for the VPC"
+  description = "VPC에 할당할 CIDR 블록 (예: 10.0.0.0/16)"
   type        = string
   default     = "10.0.0.0/16"
 }
 
 variable "public_subnets" {
-  description = "A list of CIDR blocks for the public subnets"
+  description = "퍼블릭 서브넷 CIDR 블록 목록"
   type        = list(string)
   default     = ["10.0.1.0/24", "10.0.2.0/24"]
 }
 
 variable "private_subnets" {
-  description = "A list of CIDR blocks for the private subnets"
+  description = "프라이빗 서브넷 CIDR 블록 목록"
   type        = list(string)
   default     = ["10.0.3.0/24", "10.0.4.0/24"]
 }
 
 variable "availability_zones" {
-  description = "A list of availability zones for the subnets"
+  description = "서브넷을 배포할 가용 영역 목록"
   type        = list(string)
   default     = ["us-east-1a", "us-east-1b"]
 }
 
 #######################################
-# EC2에 대한 변수
-variable "instance_type" {
-  description = "EC2 instance type"
-  type        = string
-  default     = "t3.micro"
-}
-
-variable "instance_name" {
-  description = "Name tag for the EC2 instance"
-  type        = string
-}
-
-variable "public_key_path" {
-  description = "Key path to access the EC2 instance"
-  type        = string
-}
-
-#######################################
 # RDS에 대한 변수
-variable "cluster_identifier" {
-  description = "The identifier for the Aurora cluster"
-  type        = string
-}
 
-variable "db_engine_version" {
-  description = "The version of the Aurora engine"
+variable "cluster_identifier" {
+  description = "Aurora 클러스터 식별자"
   type        = string
-  default     = "8.0.mysql_aurora.3.10.1" # 예시: MySQL 호환 버전
-  # Aurora MySQL의 최신 버전 확인 명령어:
-  # aws rds describe-db-engine-versions --region us-east-1 --engine aurora-mysql --query '*[]|[?SupportsParallelQuery == `true`].[EngineVersion]' --output text
+  default     = "my-rds"
 }
 
 variable "db_username" {
-  description = "The master username for the Aurora cluster"
+  description = "Aurora 클러스터 마스터 사용자 이름"
   type        = string
+  default     = "admin"
 }
 
 variable "db_password" {
-  description = "The master password for the Aurora cluster"
+  description = "Aurora 클러스터 마스터 비밀번호"
   type        = string
   sensitive   = true
+  default     = "securepassword123!" # 민감 정보, 환경 변수로도 관리 가능
 }
 
 variable "db_instance_class" {
-  description = "The instance class for the Aurora cluster instances"
+  description = "Aurora 클러스터 인스턴스 클래스"
   type        = string
   default     = "db.r5.large"
 }
 
 variable "allowed_cidr" {
-  description = "The CIDR block allowed to access the RDS instance"
+  description = "RDS 접근을 허용할 CIDR 블록"
   type        = string
+  default     = "10.0.0.0/16" # VPC 내부 트래픽만 허용
 }

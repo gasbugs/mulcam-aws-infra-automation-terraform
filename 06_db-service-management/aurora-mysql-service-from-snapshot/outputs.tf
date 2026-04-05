@@ -22,29 +22,26 @@ output "aurora_instance_id" {
   value       = aws_rds_cluster_instance.my_aurora_instance.id
 }
 
-# Aurora 클러스터 ARN (Amazon Resource Name)
+# Aurora 클러스터 ARN (Amazon Resource Name — AWS 리소스 고유 식별자)
 output "aurora_cluster_arn" {
   description = "The ARN of the Aurora cluster"
   value       = aws_rds_cluster.my_aurora_cluster.arn
 }
 
-
+# 생성된 VPC의 ID
 output "vpc_id" {
-  description = "The ID of the VPC created by the module"
+  description = "The ID of the VPC"
   value       = module.vpc.vpc_id
 }
 
+# 퍼블릭 서브넷 ID 목록
 output "public_subnets" {
-  description = "The public subnets created by the module"
+  description = "The public subnets"
   value       = module.vpc.public_subnets
 }
 
+# 프라이빗 서브넷 ID 목록
 output "private_subnets" {
-  description = "The private subnets created by the module"
+  description = "The private subnets"
   value       = module.vpc.private_subnets
-}
-
-output "public_dns" {
-  description = "Public domain of the EC2 instance"
-  value       = module.ec2.public_dns
 }
