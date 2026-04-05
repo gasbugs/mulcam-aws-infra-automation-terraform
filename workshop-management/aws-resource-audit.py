@@ -313,6 +313,63 @@ def perform_iam_user_cleanup(session, log: list) -> dict:
     return result
 
 
+def perform_ami_cleanup(session, log: list, enabled_regions: list) -> dict:
+    """
+    모든 활성화 리전에서 자기 소유(self) AMI를 해지(deregister)합니다.
+    AMI를 해지해야 연결된 EBS 스냅샷을 이후에 삭제할 수 있습니다.
+    반환: {"deregistered": [...], "failed": [...]}
+    """
+    result = {"deregistered": [], "failed": []}
+
+    for region in enabled_regions:
+        try:
+            ec2 = session.client('ec2', region_name=region)
+            # 자기 계정 소유 AMI만 조회
+            images = ec2.describe_images(Owners=['self']).get('Images', [])
+            for image in images:
+                image_id = image['ImageId']
+                try:
+                    ec2.deregister_image(ImageId=image_id)
+                    log.append(f"  [AMI 정리] 해지 완료: {image_id} (리전: {region})")
+                    result["deregistered"].append(image_id)
+                except ClientError as e:
+                    log.append(f"  [AMI 정리] 해지 실패 ({image_id}): {e}")
+                    result["failed"].append(image_id)
+        except (ClientError, BotoCoreError):
+            # 비활성 리전이거나 권한 없는 경우 무시
+            pass
+
+    return result
+
+
+def perform_ebs_snapshot_cleanup(session, log: list, enabled_regions: list) -> dict:
+    """
+    모든 활성화 리전에서 자기 소유(self)의 EBS 스냅샷을 전부 삭제합니다.
+    반환: {"deleted": [...], "failed": [...]}
+    """
+    result = {"deleted": [], "failed": []}
+
+    for region in enabled_regions:
+        try:
+            ec2 = session.client('ec2', region_name=region)
+            # 자기 계정 소유 스냅샷만 조회
+            snapshots = ec2.describe_snapshots(OwnerIds=['self']).get('Snapshots', [])
+            for snap in snapshots:
+                snap_id = snap['SnapshotId']
+                try:
+                    ec2.delete_snapshot(SnapshotId=snap_id)
+                    log.append(f"  [스냅샷 정리] 삭제 완료: {snap_id} (리전: {region})")
+                    result["deleted"].append(snap_id)
+                except ClientError as e:
+                    log.append(f"  [스냅샷 정리] 삭제 실패 ({snap_id}): {e}")
+                    result["failed"].append(snap_id)
+        except (ClientError, BotoCoreError):
+            # 비활성 리전이거나 권한 없는 경우 무시
+            pass
+
+    return result
+
+
 def perform_cloudfront_cleanup(session, log: list) -> dict:
     """
     CloudFront 배포를 정리합니다.
@@ -443,6 +500,12 @@ def check_aws_account(access_key, secret_key, account_name):
     # CloudFront 정리 (비활성화된 것 삭제, 활성화된 것 비활성화)
     cf_cleanup = perform_cloudfront_cleanup(session, log)
 
+    # AMI 해지 (자기 소유 전부 해지) — 스냅샷보다 먼저 실행해야 참조 해제됨
+    ami_cleanup = perform_ami_cleanup(session, log, enabled_regions)
+
+    # EBS 스냅샷 정리 (AMI 해지 후 실행해야 InUse 오류 없이 삭제 가능)
+    snap_cleanup = perform_ebs_snapshot_cleanup(session, log, enabled_regions)
+
     # 결과 집계
     if errors_found:
         for e in errors_found:
@@ -453,6 +516,10 @@ def check_aws_account(access_key, secret_key, account_name):
         if "CloudFront" in w and not cf_cleanup["skipped"] and not cf_cleanup["failed"]:
             return True
         if "IAM 사용자" in w and not iam_cleanup["failed"]:
+            return True
+        if "AMI" in w and not ami_cleanup["failed"]:
+            return True
+        if "EBS Snapshots" in w and not snap_cleanup["failed"]:
             return True
         return False
 
@@ -474,7 +541,8 @@ def check_aws_account(access_key, secret_key, account_name):
     flush_log(log)
     record_result({"account_name": account_name, "account_id": account_id,
                    "status": status, "warnings": list(set(remaining_warnings)),
-                   "cf_cleanup": cf_cleanup, "iam_cleanup": iam_cleanup})
+                   "cf_cleanup": cf_cleanup, "iam_cleanup": iam_cleanup,
+                   "ami_cleanup": ami_cleanup, "snap_cleanup": snap_cleanup})
 
 
 def print_summary(total: int):
@@ -492,6 +560,14 @@ def print_summary(total: int):
     # IAM 정리 집계
     iam_deleted = sum(len(r["iam_cleanup"].get("deleted", [])) for r in _results)
     iam_failed  = sum(len(r["iam_cleanup"].get("failed",  [])) for r in _results)
+
+    # AMI 정리 집계
+    ami_deregistered = sum(len(r["ami_cleanup"].get("deregistered", [])) for r in _results)
+    ami_failed       = sum(len(r["ami_cleanup"].get("failed",       [])) for r in _results)
+
+    # EBS 스냅샷 정리 집계
+    snap_deleted = sum(len(r["snap_cleanup"].get("deleted", [])) for r in _results)
+    snap_failed  = sum(len(r["snap_cleanup"].get("failed",  [])) for r in _results)
 
     lines = [
         "",
@@ -512,6 +588,24 @@ def print_summary(total: int):
         ]
         if iam_failed:
             lines.append(f"    · 삭제 실패          : {iam_failed}명")
+
+    if ami_deregistered or ami_failed:
+        lines += [
+            f"  ─────────────────────────────────────",
+            f"  AMI 정리 현황",
+            f"    · 해지 완료          : {ami_deregistered}개",
+        ]
+        if ami_failed:
+            lines.append(f"    · 해지 실패          : {ami_failed}개")
+
+    if snap_deleted or snap_failed:
+        lines += [
+            f"  ─────────────────────────────────────",
+            f"  EBS 스냅샷 정리 현황",
+            f"    · 삭제 완료          : {snap_deleted}개",
+        ]
+        if snap_failed:
+            lines.append(f"    · 삭제 실패          : {snap_failed}개")
 
     if cf_deleted or cf_disabled or cf_failed or cf_skipped:
         lines += [
