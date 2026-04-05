@@ -42,11 +42,34 @@ module "vpc" {
   }
 }
 
-# ACM 인증서 리소스: 사용자의 인증서를 ACM에 업로드
+# ACM 인증서 전용 RSA 키 (SSH 키와 별도 관리, ACM은 RSA 2048비트 권장)
+resource "tls_private_key" "cert" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+# TLS 프로바이더로 자체 서명 인증서 생성 (실습용 — 브라우저에서 보안 경고 발생)
+resource "tls_self_signed_cert" "example" {
+  private_key_pem = tls_private_key.cert.private_key_pem # 인증서 전용 키 사용
+
+  subject {
+    common_name  = "example.com"
+    organization = "Example Org"
+  }
+
+  validity_period_hours = 8760 # 인증서 유효 기간 1년
+
+  allowed_uses = [
+    "key_encipherment",  # TLS 핸드셰이크 시 대칭 키 암호화에 사용
+    "digital_signature", # 디지털 서명에 사용
+    "server_auth",       # 서버 인증(HTTPS)에 사용
+  ]
+}
+
+# ACM 인증서 리소스: TLS 프로바이더로 생성한 인증서를 ACM에 업로드
 resource "aws_acm_certificate" "example" {
-  private_key      = file(var.private_key_file_path)
-  certificate_body = file(var.certificate_body_file_path)
-  # certificate_chain = file(var.certificate_chain_file_path)
+  private_key      = tls_private_key.cert.private_key_pem     # 인증서 전용 키 참조
+  certificate_body = tls_self_signed_cert.example.cert_pem    # 자체 서명 인증서 본문
 }
 
 # 로드 밸런서 생성
@@ -118,7 +141,7 @@ resource "aws_autoscaling_group" "example" {
 
   # ALB 상태 확인 방식 사용 (httpd가 실제로 응답하는지 확인 후 비정상 인스턴스 교체)
   health_check_type         = "ELB"
-  health_check_grace_period = 300 # 인스턴스 부팅 및 httpd 시작 대기 시간 300초
+  health_check_grace_period = 60 # 인스턴스 부팅 및 httpd 시작 대기 시간 (실습 환경용, 애플리케이션 부팅 시간에 맞게 조정 필요)
 
   # VPC 내에서 ASG가 사용할 서브넷 설정 (다중 가용 영역에 분산 배치)
   vpc_zone_identifier = module.vpc.private_subnets
@@ -138,8 +161,10 @@ resource "aws_autoscaling_group" "example" {
     strategy = "Rolling" # 롤링 업데이트 전략 사용 (순차적 교체)
 
     preferences {
-      instance_warmup        = 100 # 인스턴스가 시작된 후 안정화되는 데 필요한 대기 시간 (초)
+      instance_warmup        = 30  # 인스턴스 안정화 대기 시간 (실습 환경용, 애플리케이션 특성에 맞게 조정 필요)
       min_healthy_percentage = 50  # 교체 과정 중 최소 50%의 인스턴스가 정상 상태를 유지
+      # 총 롤링 업데이트 소요 시간 ≈ (health_check_grace_period + instance_warmup) × 교체 인스턴스 수
+      # 예시: (60 + 30) × 2 = 약 3분
     }
 
     # instance_refresh를 트리거하는 조건

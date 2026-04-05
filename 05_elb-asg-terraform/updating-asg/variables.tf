@@ -46,25 +46,6 @@ variable "min_size" {
   default     = 2
 }
 
-# 개인 키 경로 입력
-variable "private_key_file_path" {
-  description = "Path to the private key file for the ACM certificate"
-  type        = string
-}
-
-# 인증서 경로 입력
-variable "certificate_body_file_path" {
-  description = "Path to the certificate body file for the ACM certificate"
-  type        = string
-}
-
-/* # 인증서 체인 파일 경로 입력(생략 가능)
-variable "certificate_chain_file_path" {
-  description = "Path to the certificate chain file for the ACM certificate"
-  type        = string
-}
-*/
-
 # VPC CIDR 블록을 변수로 관리 (환경별로 다른 네트워크 대역 사용 가능)
 variable "vpc_cidr" {
   description = "CIDR block for the VPC"
