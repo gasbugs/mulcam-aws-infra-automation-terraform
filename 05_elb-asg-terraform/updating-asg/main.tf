@@ -149,6 +149,9 @@ resource "aws_autoscaling_group" "example" {
   max_size            = var.max_size         # ASG가 스케일링될 때 최대 인스턴스 수
   min_size            = var.min_size         # ASG의 최소 인스턴스 수
 
+  # ALB 타겟 그룹에 직접 연결 (별도 aws_autoscaling_attachment 리소스 불필요)
+  target_group_arns = [aws_lb_target_group.example.arn]
+
   # 인스턴스 태그 설정
   tag {
     key                 = "Name"
@@ -170,18 +173,6 @@ resource "aws_autoscaling_group" "example" {
     # instance_refresh를 트리거하는 조건
     triggers = ["tag"] # 태그 변경 시 인스턴스 교체 프로세스 시작
   }
-
-  # Terraform이 관리하지 않는 특정 속성을 무시하도록 설정
-  lifecycle {
-    ignore_changes = [load_balancers, target_group_arns] # 로드 밸런서와 타겟 그룹 변경 무시
-  }
-}
-
-
-# 오토 스케일링 그룹 인스턴스를 타겟 그룹에 연결
-resource "aws_autoscaling_attachment" "example" {
-  autoscaling_group_name = aws_autoscaling_group.example.name
-  lb_target_group_arn    = aws_lb_target_group.example.arn
 }
 
 # ALB(로드 밸런서)용 보안 그룹 - 인터넷에서 HTTP/HTTPS 트래픽 허용
