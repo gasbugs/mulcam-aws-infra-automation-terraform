@@ -1,13 +1,19 @@
-# random_integer 리소스: 키 페어 이름에 사용할 랜덤 값 생성
+# 키 페어 이름 충돌 방지를 위한 랜덤 숫자 생성
 resource "random_integer" "example" {
   min = 1000
   max = 9999
 }
 
-# 기존 키 페어 사용
+# RSA 알고리즘으로 SSH 키 쌍 자동 생성 (파일 없이 Terraform이 직접 생성)
+resource "tls_private_key" "example" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+# 생성된 공개 키를 AWS에 등록하여 EC2 인스턴스 SSH 접속에 사용
 resource "aws_key_pair" "example" {
   key_name   = "example-keypair-${random_integer.example.result}"
-  public_key = file(pathexpand(var.pub_key_file_path))
+  public_key = tls_private_key.example.public_key_openssh # TLS 리소스에서 공개 키 자동 참조
 }
 
 module "vpc" {
@@ -15,19 +21,18 @@ module "vpc" {
   version = "6.5.0" # 원하는 버전으로 설정
 
   name                 = "example-vpc"
-  cidr                 = "10.0.0.0/16"
-  azs                  = ["${var.aws_region}a", "${var.aws_region}b"]
-  public_subnets       = ["10.0.1.0/24", "10.0.2.0/24"]
-  private_subnets      = ["10.0.3.0/24", "10.0.4.0/24"]
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+  cidr                 = var.vpc_cidr                                  # 변수로 관리하여 환경별 네트워크 대역 유연하게 변경 가능
+  azs                  = ["${var.aws_region}a", "${var.aws_region}b"] # 가용 영역 2개 설정
+  public_subnets       = var.public_subnets                           # 퍼블릭 서브넷 CIDR
+  private_subnets      = var.private_subnets                          # 프라이빗 서브넷 CIDR
+  enable_dns_hostnames = true # DNS 호스트 이름 활성화
+  enable_dns_support   = true # DNS 지원 활성화
 
-  # 인터넷 게이트웨이 및 라우팅 테이블을 자동으로 생성
-  create_igw = true
+  create_igw = true # 인터넷 게이트웨이 자동 생성
 
-  # NAT 게이트웨이 활성화
+  # NAT 게이트웨이 설정 (프라이빗 서브넷 → 인터넷 아웃바운드용)
   enable_nat_gateway = true
-  single_nat_gateway = true # 하나의 NAT 게이트웨이만 사용할 경우 true 설정
+  single_nat_gateway = true # 비용 절감을 위해 NAT 게이트웨이 1개만 사용
   public_subnet_tags = {
     Name = "example-public-subnet"
   }
@@ -52,6 +57,9 @@ resource "aws_lb" "example" {
   subnets                    = module.vpc.public_subnets
   security_groups            = [aws_security_group.for_alb.id]
   enable_deletion_protection = false
+
+  # 잘못된 형식의 HTTP 헤더를 가진 요청 차단 (보안 강화)
+  drop_invalid_header_fields = true
 }
 
 # HTTPS 리스너 설정
@@ -86,14 +94,16 @@ resource "aws_lb_listener" "http_redirect_listener" {
   }
 }
 
-# 로드 밸런서의 타겟 그룹 생성
+# ALB 타겟 그룹 - ALB가 트래픽을 전달할 EC2 인스턴스 집합 및 상태 확인 설정
 resource "aws_lb_target_group" "example" {
-  name     = "example-tg"
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = module.vpc.vpc_id
+  name        = "example-tg"
+  port        = 80
+  protocol    = "HTTP"
+  target_type = "instance"     # EC2 인스턴스를 직접 대상으로 등록
+  vpc_id      = module.vpc.vpc_id
+
   health_check {
-    path     = "/"
+    path     = "/" # httpd가 이 경로에 200 응답해야 정상으로 판단
     protocol = "HTTP"
   }
 }
@@ -106,9 +116,9 @@ resource "aws_autoscaling_group" "example" {
     version = "$Latest" # 가장 최신 버전의 Launch Template을 사용
   }
 
-  # 헬스 체크 타입과 그레이스 기간 설정
-  health_check_type         = "EC2" # EC2 상태 확인을 헬스 체크 기준으로 설정
-  health_check_grace_period = 180   # 헬스 체크가 시작되기 전에 기다릴 기간 (초)
+  # ALB 상태 확인 방식 사용 (httpd가 실제로 응답하는지 확인 후 비정상 인스턴스 교체)
+  health_check_type         = "ELB"
+  health_check_grace_period = 300 # 인스턴스 부팅 및 httpd 시작 대기 시간 300초
 
   # VPC 내에서 ASG가 사용할 서브넷 설정 (다중 가용 영역에 분산 배치)
   vpc_zone_identifier = module.vpc.private_subnets
@@ -149,52 +159,61 @@ resource "aws_autoscaling_attachment" "example" {
   lb_target_group_arn    = aws_lb_target_group.example.arn
 }
 
-# ALB 보안 그룹에 HTTPS 트래픽 허용 규칙 추가
+# ALB(로드 밸런서)용 보안 그룹 - 인터넷에서 HTTP/HTTPS 트래픽 허용
 resource "aws_security_group" "for_alb" {
   name_prefix = "for-alb"
+  description = "Allow HTTP and HTTPS from internet"
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  vpc_id = module.vpc.vpc_id
-  tags = {
-    Name = "for-alb"
-  }
-}
-
-
-# EC2 보안 그룹에 HTTP 트래픽 허용 규칙 추가
-resource "aws_security_group" "for_ec2" {
-  name_prefix = "for-ec2"
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
+    description = "Allow HTTP from internet" # HTTP→HTTPS 리다이렉션을 위해 80도 허용
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  ingress {
+    description = "Allow HTTPS from internet"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"           # 모든 프로토콜 허용
+    cidr_blocks = ["0.0.0.0/0"] # 모든 아웃바운드 트래픽 허용
+  }
+
+  tags = {
+    Name = "for-alb"
+  }
+}
+
+# EC2 인스턴스용 보안 그룹 - ALB에서 오는 트래픽만 허용 (직접 인터넷 접근 차단)
+resource "aws_security_group" "for_ec2" {
+  name_prefix = "for-ec2"
+  description = "Allow HTTP from ALB only"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    description     = "Allow HTTP from ALB only" # ALB 보안 그룹에서 오는 HTTP 트래픽만 허용
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.for_alb.id] # ALB SG에서 오는 트래픽만 허용
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  vpc_id = module.vpc.vpc_id
+
   tags = {
     Name = "for-ec2"
   }
@@ -210,5 +229,55 @@ resource "aws_launch_template" "example" {
 
   network_interfaces {
     security_groups = [aws_security_group.for_ec2.id]
+  }
+}
+
+# 스케일 아웃 정책 - CPU가 높을 때 인스턴스를 1개 추가
+resource "aws_autoscaling_policy" "scale_out_policy" {
+  name                   = "scale-out-policy"
+  scaling_adjustment     = 1                  # 인스턴스 1개 추가
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300                # 스케일링 후 300초 동안 추가 스케일링 대기
+  autoscaling_group_name = aws_autoscaling_group.example.name
+}
+
+# 스케일 인 정책 - CPU가 낮을 때 인스턴스를 1개 제거
+resource "aws_autoscaling_policy" "scale_in_policy" {
+  name                   = "scale-in-policy"
+  scaling_adjustment     = -1                 # 인스턴스 1개 감소
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300
+  autoscaling_group_name = aws_autoscaling_group.example.name
+}
+
+# CloudWatch 알람 - CPU 60% 이상 2회 연속 측정 시 스케일 아웃 트리거
+resource "aws_cloudwatch_metric_alarm" "cpu_high" {
+  alarm_name          = "cpu_high"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 2            # 2회 연속 측정
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = 120          # 측정 주기 120초
+  statistic           = "Average"
+  threshold           = 60           # CPU 60% 이상이면 스케일 아웃
+  alarm_actions       = [aws_autoscaling_policy.scale_out_policy.arn]
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.example.name
+  }
+}
+
+# CloudWatch 알람 - CPU 30% 이하 2회 연속 측정 시 스케일 인 트리거
+resource "aws_cloudwatch_metric_alarm" "cpu_low" {
+  alarm_name          = "cpu_low"
+  comparison_operator = "LessThanOrEqualToThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = 120
+  statistic           = "Average"
+  threshold           = 30           # CPU 30% 이하이면 스케일 인
+  alarm_actions       = [aws_autoscaling_policy.scale_in_policy.arn]
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.example.name
   }
 }

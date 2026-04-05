@@ -20,12 +20,6 @@ variable "asg_tag" {
   type        = string
 }
 
-# 퍼블릭 키 경로
-variable "pub_key_file_path" {
-  description = "value"
-  type        = string
-}
-
 # 인스턴스 타입을 변수로 정의 (필요시 변경 가능)
 variable "instance_type" {
   description = "EC2 instance type"
@@ -70,3 +64,22 @@ variable "certificate_chain_file_path" {
   type        = string
 }
 */
+
+# VPC CIDR 블록을 변수로 관리 (환경별로 다른 네트워크 대역 사용 가능)
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "public_subnets" {
+  description = "List of public subnet CIDR blocks"
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+}
+
+variable "private_subnets" {
+  description = "List of private subnet CIDR blocks"
+  type        = list(string)
+  default     = ["10.0.3.0/24", "10.0.4.0/24"]
+}

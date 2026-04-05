@@ -45,34 +45,74 @@ locals {
   timestamp = regex_replace(timestamp(), "[- TZ:]", "") # 현재 시간을 문자열로 가져온 후, 허용되지 않는 문자 제거
 }
 
-# Amazon EBS 기반 AMI 빌더 소스 정의 — 임시 EC2를 띄워 소프트웨어를 설치한 뒤 AMI로 굽는 방식
-source "amazon-ebs" "al2023_httpd" {
-  profile       = var.profile       # AWS CLI 프로파일 지정
-  region        = var.aws_region    # 리전 지정
-  instance_type = var.instance_type # 빌드에 사용할 임시 EC2 인스턴스 타입
-  ssh_username  = "ec2-user"        # Amazon Linux 기본 SSH 사용자
-  source_ami    = data.amazon-ami.al2023.id             # 위에서 조회한 최신 AL2023 AMI 사용
-  ami_name      = "packer-amazon-linux-2023-${local.timestamp}" # 타임스탬프로 이름 중복 방지
-  ami_description = "Amazon Linux 2023 with Apache httpd — built by Packer" # AMI 설명 (콘솔에서 식별 용이)
+# [V1 소스] 구버전 AMI — ASG 업데이트 실습에서 초기 배포에 사용할 이미지
+source "amazon-ebs" "al2023_httpd_v1" {
+  profile         = var.profile
+  region          = var.aws_region
+  instance_type   = var.instance_type
+  ssh_username    = "ec2-user"                                              # Amazon Linux 기본 SSH 사용자
+  source_ami      = data.amazon-ami.al2023.id                              # 위에서 조회한 최신 AL2023 AMI 사용
+  ami_name        = "httpd-v1-${local.timestamp}"                          # 타임스탬프로 이름 중복 방지
+  ami_description = "Amazon Linux 2023 with Apache httpd v1 - built by Packer" # AMI 설명 (ASCII만 허용)
 
-  # 생성된 AMI에 태그 추가 — AWS 콘솔에서 용도·빌드 날짜를 쉽게 식별하기 위함
+  # 생성된 AMI에 태그 추가 — v1/v2 구분 및 빌드 날짜 기록
   tags = {
-    Name      = "packer-amazon-linux-2023-httpd"
+    Name      = "httpd-v1"
+    Version   = "v1"
     BuildDate = local.timestamp
     Builder   = "packer"
   }
 }
 
-# 빌드 블록: AMI 생성 시 수행할 작업 정의
-build {
-  sources = ["source.amazon-ebs.al2023_httpd"] # 위에서 정의한 소스를 참조
+# [V2 소스] 신버전 AMI — ASG 업데이트 실습에서 교체 대상 이미지 (instance_refresh 트리거 후 배포됨)
+source "amazon-ebs" "al2023_httpd_v2" {
+  profile         = var.profile
+  region          = var.aws_region
+  instance_type   = var.instance_type
+  ssh_username    = "ec2-user"
+  source_ami      = data.amazon-ami.al2023.id
+  ami_name        = "httpd-v2-${local.timestamp}"
+  ami_description = "Amazon Linux 2023 with Apache httpd v2 - built by Packer" # AMI 설명 (ASCII만 허용)
 
-  # 쉘 프로비저너를 통해 인스턴스에 필요한 작업 실행
+  tags = {
+    Name      = "httpd-v2"
+    Version   = "v2"
+    BuildDate = local.timestamp
+    Builder   = "packer"
+  }
+}
+
+# 빌드 블록: v1, v2 두 소스를 동시에 빌드 (병렬 실행)
+build {
+  sources = [
+    "source.amazon-ebs.al2023_httpd_v1",
+    "source.amazon-ebs.al2023_httpd_v2",
+  ]
+
+  # 공통 프로비저너: 두 이미지 모두 httpd 설치 및 활성화
   provisioner "shell" {
     inline = [
-      "sudo yum update -y",                 # 인스턴스 패키지 업데이트
-      "sudo yum install httpd -y",          # Apache 웹 서버(httpd) 설치
-      "sudo systemctl enable httpd --now"  # Apache 웹 서버 서비스 활성화 및 즉시 시작
+      "sudo yum update -y",                # 인스턴스 패키지 업데이트
+      "sudo yum install httpd -y",         # Apache 웹 서버(httpd) 설치
+      "sudo systemctl enable httpd --now", # Apache 웹 서버 서비스 활성화 및 즉시 시작
+    ]
+  }
+
+  # V1 전용 프로비저너: 구버전임을 나타내는 index.html 생성 (실습 시 브라우저로 버전 확인 가능)
+  provisioner "shell" {
+    only = ["amazon-ebs.al2023_httpd_v1"] # v1 소스에만 적용
+
+    inline = [
+      "echo '<h1>Version 1 - Hello from old server!</h1>' | sudo tee /var/www/html/index.html",
+    ]
+  }
+
+  # V2 전용 프로비저너: 신버전임을 나타내는 index.html 생성 (롤링 업데이트 완료 후 변경된 내용 확인용)
+  provisioner "shell" {
+    only = ["amazon-ebs.al2023_httpd_v2"] # v2 소스에만 적용
+
+    inline = [
+      "echo '<h1>Version 2 - Hello from new server!</h1>' | sudo tee /var/www/html/index.html",
     ]
   }
 }

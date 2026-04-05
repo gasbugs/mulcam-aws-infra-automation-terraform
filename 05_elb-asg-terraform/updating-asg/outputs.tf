@@ -26,3 +26,10 @@ output "alb_dns_name" {
   description = "The DNS name of the Application Load Balancer"
   value       = aws_lb.example.dns_name
 }
+
+# Terraform이 생성한 SSH 프라이빗 키 출력 (민감 정보 - terraform output -raw private_key_pem 으로 확인)
+output "private_key_pem" {
+  description = "EC2 SSH 접속에 사용할 프라이빗 키 (PEM 형식). 파일로 저장 후 chmod 400 적용 필요"
+  value       = tls_private_key.example.private_key_pem
+  sensitive   = true # 민감 정보이므로 일반 출력 시 숨김 처리
+}
