@@ -9,13 +9,8 @@ output "dynamodb_table_arn" {
 }
 
 output "dynamodb_endpoint_id" {
-  description = "ID of the VPC endpoint for DynamoDB"
+  description = "ID of the VPC Gateway Endpoint for DynamoDB"
   value       = aws_vpc_endpoint.dynamodb_endpoint.id
-}
-
-output "dynamodb_security_group_id" {
-  description = "Security group ID for the DynamoDB VPC endpoint"
-  value       = aws_security_group.dynamodb_sg.id
 }
 
 output "ec2_instance_profile" {

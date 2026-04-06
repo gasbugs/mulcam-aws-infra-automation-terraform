@@ -22,5 +22,4 @@ redis_auth_token          = "YourStrongAuthPassword123!"
 # EC2 settings
 ec2_ami_id                  = "ami-0fff1b9a61dec8a5f"
 ec2_instance_type           = "t3.micro"
-ec2_public_key_path         = "~/.ssh/my-key.pub"
 ec2_allowed_ssh_cidr_blocks = ["0.0.0.0/0"]

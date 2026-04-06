@@ -19,11 +19,6 @@ variable "instance_type" {
   default     = "t3.micro"
 }
 
-variable "public_key_path" {
-  description = "Key path of ssh ec2 public key"
-  type        = string
-}
-
 variable "project_name" {
   description = "Project name for tagging resources"
   type        = string
@@ -41,9 +36,9 @@ variable "redis_cidr_blocks" {
 }
 
 variable "user_data" {
-  description = "User data script to launch EC2"
+  description = "User data script to launch EC2 (#!/bin/bash 헤더 포함 필요)"
   type        = string
-  default     = "sudo yum install python3-pip && sudo pip3 install redis"
+  default     = "#!/bin/bash\nyum install -y python3-pip && pip3 install redis boto3"
 }
 
 variable "ec2_instance_profile" {

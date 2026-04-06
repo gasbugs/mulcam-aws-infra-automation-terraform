@@ -1,15 +1,10 @@
 variable "vpc_id" {
-  description = "VPC ID to create the DynamoDB VPC endpoint"
+  description = "VPC ID — DynamoDB Gateway 엔드포인트가 연결될 VPC"
   type        = string
 }
 
-variable "private_subnet_ids" {
-  description = "List of private subnet IDs where the DynamoDB endpoint will be accessible"
-  type        = list(string)
-}
-
-variable "private_subnet_cidrs" {
-  description = "List of CIDR blocks for private subnets"
+variable "private_route_table_ids" {
+  description = "프라이빗 서브넷의 라우팅 테이블 ID 목록 — Gateway 엔드포인트 경로 추가에 사용"
   type        = list(string)
 }
 

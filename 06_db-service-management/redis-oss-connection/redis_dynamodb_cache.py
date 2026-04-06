@@ -1,3 +1,28 @@
+"""
+[실습 2단계] Cache-Aside 패턴 — Redis + DynamoDB 연동
+
+목적:
+  - Cache-Aside(Lazy Loading) 패턴을 이해하고 구현한다
+  - 데이터 조회 시 Redis 캐시를 먼저 확인하고, 없으면 DynamoDB에서 가져와 캐시에 저장한다
+  - TTL(만료 시간)을 설정해 오래된 캐시 데이터를 자동 정리한다
+  - 데이터 수정 시 DynamoDB와 Redis 캐시를 동시에 갱신해 일관성을 유지한다
+
+Cache-Aside 흐름:
+  1. Redis 캐시 조회 → 캐시 히트: 바로 반환
+  2. 캐시 미스: DynamoDB에서 데이터 조회
+  3. 조회 결과를 Redis에 TTL과 함께 저장
+  4. 데이터 변경 시 DynamoDB 업데이트 + Redis 캐시도 함께 갱신
+
+사전 조건:
+  - Terraform으로 ElastiCache, DynamoDB, EC2 배포 완료
+  - EC2 인스턴스에 DynamoDB 접근용 IAM 역할 부여 (Terraform이 자동 구성)
+  - EC2 인스턴스에서 실행
+  - pip3 install redis boto3
+
+실행 방법:
+  python3 redis_dynamodb_cache.py
+"""
+
 import time
 import redis
 import boto3
@@ -50,21 +75,21 @@ def get_cache_with_ttl(key):
             redis_client.delete(f"{key}:timestamp")
     return None
 
-# RDS에서 데이터를 조회하고 Redis에 캐시
+# DynamoDB에서 데이터를 조회하고 Redis에 캐시
 def get_data(key):
     # 1. Redis에서 데이터 조회 (캐시 확인)
     value = get_cache_with_ttl(key)
     if value:
         return value
 
-    # 2. 캐시가 없거나 오래되었으면 RDS 조회
+    # 2. 캐시가 없거나 오래되었으면 DynamoDB 조회
     try:
         response = table.get_item(
             Key={'id': key}
         )
         if 'Item' in response:
             item = response['Item']
-            # RDS에서 조회한 데이터를 Redis에 캐시
+            # DynamoDB에서 조회한 데이터를 Redis에 캐시
             set_cache_with_ttl(key, item['data'])
             print(f"{key} found in DynamoDB and cached in Redis.")
             return item['data']
@@ -75,9 +100,9 @@ def get_data(key):
         print(f"Failed to connect to DynamoDB: {e}")
         return None
 
-# 데이터 수정 시 RDS와 Redis 모두 업데이트
+# 데이터 수정 시 DynamoDB와 Redis 캐시 모두 업데이트
 def update_data(key, value):
-    # 1. RDS에 데이터 업데이트
+    # 1. DynamoDB에 데이터 업데이트
     try:
         table.put_item(
             Item={
@@ -86,7 +111,7 @@ def update_data(key, value):
             }
         )
         print(f"Data updated in DynamoDB with id: {key}")
-        
+
         # 2. Redis 캐시 업데이트
         set_cache_with_ttl(key, value)
         print(f"Data updated in Redis cache with key: {key}")
@@ -102,7 +127,7 @@ def seed_data():
         {'id': '3', 'data': 'Initial data 3'},
         {'id': '123', 'data': 'Hello, DynamoDB!'}  # 이전 예제에서 조회한 키 포함
     ]
-    
+
     try:
         for item in seed_items:
             table.put_item(Item=item)
@@ -117,11 +142,11 @@ seed_data()
 key = '123'
 new_value = 'Hello, Updated Data!'
 
-# 1. 데이터 조회 (최초 조회 시 캐시 미스, RDS에서 가져와 캐시 저장)
+# 1. 데이터 조회 (최초 조회 시 캐시 미스 → DynamoDB에서 가져와 캐시 저장)
 retrieved_value = get_data(key)
 print(f"Retrieved value: {retrieved_value}")
 
-# 2. 데이터 수정 (RDS 및 Redis 캐시 동기화)
+# 2. 데이터 수정 (DynamoDB 및 Redis 캐시 동기화)
 update_data(key, new_value)
 
 # 3. 수정 후 데이터 재조회 (Redis 캐시 사용)

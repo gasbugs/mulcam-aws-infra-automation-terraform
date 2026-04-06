@@ -1,3 +1,19 @@
+"""
+[실습 1단계] Redis 기본 연결 및 읽기/쓰기
+
+목적:
+  - TLS와 AUTH 토큰을 사용해 ElastiCache(Valkey/Redis)에 안전하게 연결한다
+  - set() 명령으로 데이터를 저장하고 get() 명령으로 조회하는 기본 흐름을 실습한다
+
+사전 조건:
+  - Terraform으로 ElastiCache Replication Group 및 EC2 배포 완료
+  - EC2 인스턴스에서 실행 (Redis가 프라이빗 서브넷에 위치하므로 퍼블릭 접근 불가)
+  - pip3 install redis
+
+실행 방법:
+  python3 redis_basic.py
+"""
+
 import redis
 
 # Redis 클러스터 엔드포인트로 연결

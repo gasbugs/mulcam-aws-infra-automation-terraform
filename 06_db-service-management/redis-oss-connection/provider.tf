@@ -4,7 +4,15 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
+      version = "~> 6.0"        # 6.x.x 버전대의 AWS 프로바이더 사용
+    }
+    tls = {
+      source  = "hashicorp/tls" # EC2 SSH 키 자동 생성에 사용
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local" # 생성된 프라이빗 키를 로컬 파일로 저장
+      version = "~> 2.0"
     }
   }
 }

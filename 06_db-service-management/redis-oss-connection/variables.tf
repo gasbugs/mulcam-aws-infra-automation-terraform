@@ -124,11 +124,6 @@ variable "ec2_instance_type" {
   default     = "t3.micro"
 }
 
-variable "ec2_public_key_path" {
-  description = "Key path of ssh ec2 public key"
-  type        = string
-}
-
 variable "ec2_allowed_ssh_cidr_blocks" {
   description = "CIDR blocks allowed for SSH access"
   type        = list(string)
