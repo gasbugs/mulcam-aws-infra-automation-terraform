@@ -93,7 +93,27 @@ def _check_cost(cred: dict, period: dict) -> None:
     log = [f"{'='*60}", f"  [{account_name} / Key: {cred['access_key'][:5]}...] 비용 조회 ({period['Start']})"]
 
     session = make_session(cred["access_key"], cred["secret_key"])
-    account_id = get_account_id(session)
+
+    # 자격증명이 terraform-user-1 (수강생 계정)인 경우 실행을 차단한다.
+    # Cost Explorer API는 호출당 $0.01이 청구되므로 수강생이 사용하면 안 된다.
+    try:
+        sts = session.client("sts")
+        caller = sts.get_caller_identity()
+        caller_arn = caller.get("Arn", "")
+        if "terraform-user-1" in caller_arn:
+            log += [
+                f"  [차단] 비용 문제로 이 기능은 닫혀 있습니다. 관리자에게 문의하세요.",
+                f"{'='*60}",
+            ]
+            flush_log(log)
+            record_result({"name": account_name, "account_id": None,
+                           "status": "차단", "error_reason": "terraform-user-1 사용 불가",
+                           "total_usd": None, "billed_services": []})
+            return
+        account_id = caller.get("Account")
+    except Exception:
+        account_id = get_account_id(session)
+
     if not account_id:
         log += ["  [오류] 계정 ID 조회 실패", f"{'='*60}"]
         flush_log(log)
