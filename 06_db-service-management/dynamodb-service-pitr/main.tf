@@ -26,8 +26,13 @@ resource "aws_dynamodb_table" "users_table" {
   # 글로벌 보조 인덱스 설정 (Global Secondary Index)
   global_secondary_index {
     name            = "UsernameIndex" # 인덱스의 이름 설정
-    hash_key        = "Username"      # 인덱스의 해시 키로 사용할 속성
     projection_type = "ALL"           # 인덱스에서 모든 테이블 속성을 가져오도록 설정
+
+    # GSI 내부 hash_key/range_key는 만료됨 → key_schema 블록 사용 (AWS provider 6.x)
+    key_schema {
+      attribute_name = "Username" # 인덱스의 파티션 키로 사용할 속성
+      key_type       = "HASH"
+    }
   }
 
   attribute {
@@ -35,8 +40,13 @@ resource "aws_dynamodb_table" "users_table" {
     type = "S" # 'Username'은 문자열(String) 타입으로 보조 인덱스의 해시 키에 사용
   }
 
+  # PITR(Point-In-Time Recovery) — 최대 35일 이내 특정 시점으로 복구 가능
   point_in_time_recovery {
     enabled = true
+  }
+
+  tags = {
+    Name = var.table_name # 테이블 이름 태그 — AWS 콘솔에서 리소스 식별에 사용
   }
 }
 
@@ -46,6 +56,10 @@ resource "aws_dynamodb_table" "users_table" {
 # 백업을 저장할 Vault 생성
 resource "aws_backup_vault" "dynamodb_backup_vault" {
   name = "dynamodb-backup-vault"
+
+  tags = {
+    Name = "dynamodb-backup-vault" # Vault 이름 태그 — AWS 콘솔에서 리소스 식별에 사용
+  }
 }
 
 # 백업 계획 생성 (백업 주기와 보관 주기 정의)
@@ -68,9 +82,9 @@ resource "aws_backup_selection" "dynamodb_backup_selection" {
   name         = "dynamodb-backup-selection"
   plan_id      = aws_backup_plan.dynamodb_backup_plan.id
 
-  # 백업할 DynamoDB 테이블의 ARN
+  # 백업할 DynamoDB 테이블의 ARN — 리소스 속성을 직접 참조해 하드코딩 방지
   resources = [
-    "arn:aws:dynamodb:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/${aws_dynamodb_table.users_table.name}"
+    aws_dynamodb_table.users_table.arn
   ]
 }
 
@@ -98,7 +112,3 @@ resource "aws_iam_role_policy_attachment" "backup_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
 }
 
-# 현재 AWS 리전 및 계정 정보
-data "aws_region" "current" {}
-
-data "aws_caller_identity" "current" {}
