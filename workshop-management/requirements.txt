@@ -1,0 +1,7 @@
+# awsw CLI 의존성 패키지
+# 설치: pip install -r requirements.txt
+
+boto3       # AWS SDK — 모든 커맨드에서 사용
+click       # CLI 프레임워크 — 커맨드/옵션 정의
+rich        # 컬러 테이블 및 출력 포맷 — utils/output.py
+pyyaml      # terraform-resource-types.yaml 로드 — audit/clean 커맨드

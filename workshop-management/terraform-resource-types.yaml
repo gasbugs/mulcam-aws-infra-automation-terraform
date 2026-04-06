@@ -1,0 +1,166 @@
+# 이 파일은 리포지토리 전체 Terraform 프로젝트에서 사용 중인 리소스 타입 목록입니다.
+# 수집 방법: grep -rh '^resource "' --include="*.tf" --exclude-dir=".terraform"
+# 목적: aws-resource-audit.py / aws-workshop-teardown.py 의 감사·삭제 대상 관리
+# 마지막 수집일: 2026-04-06
+
+# ──────────────────────────────────────────────────
+# AWS 리소스 — 카테고리별 분류
+# ──────────────────────────────────────────────────
+aws:
+
+  compute:
+    - aws_instance                   # EC2 가상 머신
+    - aws_launch_template            # ASG에서 쓸 EC2 시작 설정 템플릿
+    - aws_autoscaling_group          # 자동 확장/축소 그룹
+    - aws_autoscaling_policy         # ASG 확장 정책
+    - aws_autoscaling_attachment     # ASG와 로드밸런서 연결
+    - aws_key_pair                   # EC2 SSH 접속 키 페어
+    - aws_ebs_volume                 # EC2에 붙이는 추가 디스크
+    - aws_volume_attachment          # EBS 볼륨을 EC2에 연결
+
+  networking:
+    - aws_vpc                                    # 격리된 가상 네트워크
+    - aws_subnet                                 # VPC 내 서브넷
+    - aws_internet_gateway                       # 인터넷 연결 게이트웨이
+    - aws_route_table                            # 트래픽 경로 테이블
+    - aws_route_table_association                # 서브넷과 라우트 테이블 연결
+    - aws_security_group                         # 인바운드/아웃바운드 방화벽 그룹
+    - aws_security_group_rule                    # 보안 그룹 규칙 (구형)
+    - aws_vpc_security_group_ingress_rule        # 인바운드 보안 규칙 (신형)
+    - aws_vpc_security_group_egress_rule         # 아웃바운드 보안 규칙 (신형)
+    - aws_vpc_endpoint                           # VPC 내부에서 AWS 서비스 직접 접근
+
+  load_balancing:
+    - aws_lb               # Application / Network 로드밸런서
+    - aws_lb_listener      # 로드밸런서 리스너 (포트·프로토콜)
+    - aws_lb_target_group  # 트래픽을 받을 대상 그룹
+
+  storage_s3:
+    - aws_s3_bucket                                  # S3 버킷
+    - aws_s3_bucket_policy                           # 버킷 접근 정책
+    - aws_s3_bucket_public_access_block              # 퍼블릭 접근 차단 설정
+    - aws_s3_bucket_server_side_encryption_configuration  # 서버 측 암호화
+    - aws_s3_bucket_versioning                       # 버전 관리 활성화
+    - aws_s3_bucket_website_configuration            # 정적 웹사이트 호스팅 설정
+    - aws_s3_object                                  # 버킷에 업로드되는 객체(파일)
+
+  storage_efs:
+    - aws_efs_file_system    # 공유 파일 시스템 (NFS 기반)
+    - aws_efs_mount_target   # EFS를 서브넷에 마운트하는 엔드포인트
+
+  serverless:
+    - aws_lambda_function       # Lambda 함수
+    - aws_lambda_permission     # Lambda 호출 권한 부여
+    - aws_apigatewayv2_api      # HTTP API 게이트웨이
+    - aws_apigatewayv2_integration  # API → Lambda 연결
+    - aws_apigatewayv2_route    # API 라우팅 규칙
+    - aws_apigatewayv2_stage    # API 배포 스테이지 (dev/prod 등)
+
+  database_rds:
+    - aws_db_instance           # RDS 단일 데이터베이스 인스턴스
+    - aws_db_subnet_group       # RDS가 배치될 서브넷 그룹
+    - aws_db_cluster_snapshot   # RDS 클러스터 스냅샷
+    - aws_rds_cluster           # Aurora 클러스터
+    - aws_rds_cluster_instance  # Aurora 클러스터 내 개별 인스턴스
+
+  database_dynamodb:
+    - aws_dynamodb_table  # DynamoDB NoSQL 테이블
+
+  database_elasticache:
+    - aws_elasticache_replication_group  # ElastiCache(Valkey/Redis) 복제 그룹
+    - aws_elasticache_subnet_group       # ElastiCache 서브넷 그룹
+
+  containers_ecs:
+    - aws_ecs_cluster                    # ECS 컨테이너 클러스터
+    - aws_ecs_cluster_capacity_providers # 클러스터 용량 공급자 연결
+    - aws_ecs_capacity_provider          # EC2/Fargate 용량 공급자
+    - aws_ecs_service                    # ECS 서비스 (태스크 유지 관리)
+    - aws_ecs_task_definition            # 실행할 컨테이너 설정 명세
+
+  containers_eks:
+    - aws_eks_cluster         # EKS 쿠버네티스 클러스터
+    - aws_eks_node_group      # 워커 노드 그룹
+    - aws_eks_fargate_profile # Fargate 기반 파드 실행 프로파일
+    - aws_eks_addon           # EKS 애드온 (CoreDNS, kube-proxy 등)
+
+  containers_ecr:
+    - aws_ecr_repository               # 컨테이너 이미지 저장소
+    - aws_ecr_pull_through_cache_rule  # 외부 레지스트리 캐싱 규칙
+
+  iam:
+    - aws_iam_role                    # IAM 역할 (서비스용)
+    - aws_iam_role_policy             # 역할에 직접 붙이는 인라인 정책
+    - aws_iam_role_policy_attachment  # 역할에 관리형 정책 연결
+    - aws_iam_policy                  # 재사용 가능한 IAM 관리형 정책
+    - aws_iam_user                    # IAM 사용자
+    - aws_iam_user_login_profile      # 콘솔 로그인 설정
+    - aws_iam_user_policy_attachment  # 사용자에 관리형 정책 연결
+    - aws_iam_group                   # IAM 그룹
+    - aws_iam_group_membership        # 그룹 멤버십
+    - aws_iam_group_policy_attachment # 그룹에 관리형 정책 연결
+    - aws_iam_instance_profile        # EC2에 IAM 역할 부여하는 프로파일
+    - aws_iam_access_key              # IAM 사용자 액세스 키
+
+  security:
+    - aws_kms_key                         # KMS 암호화 키
+    - aws_secretsmanager_secret           # Secrets Manager 비밀 항목
+    - aws_secretsmanager_secret_version   # 비밀 값(버전)
+    - aws_secretsmanager_secret_rotation  # 비밀 자동 교체 설정
+    - aws_acm_certificate                 # ACM SSL/TLS 인증서
+    - aws_wafv2_web_acl                   # WAF 웹 접근 제어 목록
+
+  cdn:
+    - aws_cloudfront_distribution          # CloudFront CDN 배포
+    - aws_cloudfront_origin_access_control # CloudFront → S3 접근 제한(OAC)
+
+  dns:
+    - aws_route53_zone    # Route53 호스팅 존 (도메인)
+    - aws_route53_record  # DNS 레코드 (A, CNAME 등)
+
+  monitoring:
+    - aws_cloudwatch_log_group     # CloudWatch 로그 그룹
+    - aws_cloudwatch_metric_alarm  # CloudWatch 지표 알람
+
+  backup:
+    - aws_backup_plan       # AWS Backup 계획
+    - aws_backup_vault      # 백업 데이터 저장소
+    - aws_backup_selection  # 백업 대상 리소스 선택
+
+  cicd:
+    - aws_codebuild_project         # CodeBuild 빌드 프로젝트
+    - aws_codepipeline              # CodePipeline CI/CD 파이프라인
+    - aws_codepipeline_webhook      # 파이프라인 웹훅 트리거
+    - aws_codestarconnections_connection  # GitHub 등 외부 소스 연결
+
+  sso:
+    - aws_identitystore_user               # IAM Identity Center 사용자
+    - aws_identitystore_group              # IAM Identity Center 그룹
+    - aws_identitystore_group_membership   # Identity Center 그룹 멤버십
+    - aws_ssoadmin_permission_set          # SSO 권한 세트
+    - aws_ssoadmin_account_assignment      # 계정에 권한 세트 할당
+
+# ──────────────────────────────────────────────────
+# 비 AWS 리소스 — audit/delete 대상 제외
+# ──────────────────────────────────────────────────
+non_aws:
+
+  kubernetes:
+    - helm_release                  # Helm 차트 배포
+    - kubectl_manifest              # kubectl로 적용하는 쿠버네티스 매니페스트
+    - kubernetes_namespace          # 쿠버네티스 네임스페이스
+    - kubernetes_namespace_v1       # 쿠버네티스 네임스페이스 (v1 API)
+    - kubernetes_pod                # 쿠버네티스 파드
+    - kubernetes_service            # 쿠버네티스 서비스
+    - kubernetes_service_account    # 쿠버네티스 서비스 어카운트
+    - kubernetes_service_account_v1 # 쿠버네티스 서비스 어카운트 (v1 API)
+
+  terraform_utilities:
+    - local_file             # 로컬 파일 생성 (예: kubeconfig)
+    - local_sensitive_file   # 민감 정보 로컬 파일 (예: SSH 키)
+    - null_resource          # 실제 리소스 없이 프로비저너 실행용
+    - random_integer         # 랜덤 정수 생성
+    - random_string          # 랜덤 문자열 생성
+    - time_sleep             # 지정 시간 대기 (의존성 순서 제어)
+    - time_static            # 고정 타임스탬프 (리소스 생성 시점 기록)
+    - tls_private_key        # TLS/SSH 개인키 생성
+    - tls_self_signed_cert   # 자체 서명 인증서 생성

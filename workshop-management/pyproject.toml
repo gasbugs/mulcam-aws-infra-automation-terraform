@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awsw"
+version = "0.1.0"
+description = "AWS 워크샵 운영 CLI — 계정 관리, 리소스 감사, 비용 모니터링"
+requires-python = ">=3.9"
+dependencies = [
+    "boto3",
+    "click",
+    "rich",
+    "pyyaml",
+]
+
+# pipx install . 또는 pip install -e . 후 awsw 커맨드로 실행 가능
+[project.scripts]
+awsw = "awsw:cli"
+
+# setuptools가 commands/, utils/ 패키지를 자동 탐색하도록 설정
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["commands*", "utils*"]
