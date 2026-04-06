@@ -30,20 +30,22 @@ variable "table_name" {
   default     = "Users"
 }
 
-variable "read_capacity" {
-  description = "The read capacity units for the DynamoDB table"
-  type        = number
-  default     = 5
-}
+# billing_mode = PROVISIONED 사용 시 활성화 (현재는 PAY_PER_REQUEST 모드로 불필요)
+# variable "read_capacity" {
+#   description = "The read capacity units for the DynamoDB table"
+#   type        = number
+#   default     = 5
+# }
 
-variable "write_capacity" {
-  description = "The write capacity units for the DynamoDB table"
-  type        = number
-  default     = 5
-}
+# variable "write_capacity" {
+#   description = "The write capacity units for the DynamoDB table"
+#   type        = number
+#   default     = 5
+# }
 
-variable "project" {
-  description = "The project tag for the DynamoDB table"
-  type        = string
-  default     = "UserManagement"
-}
+# 프로젝트 태그 활용 시 활성화
+# variable "project" {
+#   description = "The project tag for the DynamoDB table"
+#   type        = string
+#   default     = "UserManagement"
+# }

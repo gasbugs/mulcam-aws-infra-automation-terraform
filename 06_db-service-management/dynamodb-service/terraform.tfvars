@@ -7,7 +7,8 @@ owner       = "TeamA"
 
 #######################################
 # DynamoDB 변수
-table_name     = "Users"
-read_capacity  = 5
-write_capacity = 5
-project        = "UserManagement"
+table_name = "Users"
+# billing_mode = PROVISIONED 사용 시 활성화
+# read_capacity  = 5
+# write_capacity = 5
+# project        = "UserManagement"
