@@ -24,18 +24,15 @@ instance_name = "db_client"
 # Aurora 클러스터 식별자
 cluster_identifier = "my-aurora-cluster"
 
-# Aurora 엔진 버전
-# Aurora MySQL의 최신 버전 확인 명령어:
-# aws rds describe-db-engine-versions --region us-east-1 --engine aurora-mysql --query '*[]|[?SupportsParallelQuery == `true`].[EngineVersion]' --output text
-# db_engine_version = "8.0.mysql_aurora.3.09.0" # 기존 버전
-db_engine_version = "8.0.mysql_aurora.3.10.1" # 업그레이드 버전
+# db_engine_version은 기본적으로 자동 조회 — 버전을 고정하려면 아래 주석 해제
+# db_engine_version = "8.0.mysql_aurora.3.12.0"
 
 # 마스터 사용자 이름 및 비밀번호
 db_username = "admin"         # 원하는 마스터 사용자 이름
 db_password = "your-password" # 안전한 마스터 비밀번호 (보안에 유의)
 
-# Aurora 인스턴스 클래스 # db.r5.xlarge
-db_instance_class = "db.r5.xlarge" # 사용하려는 인스턴스 타입 지정
+# Aurora 인스턴스 클래스 — r8g(현 세대 Graviton3)이 r5 대비 성능↑ 비용↓
+db_instance_class = "db.r8g.large" # 사용하려는 인스턴스 타입 지정
 
 
 # 접근 허용 CIDR

@@ -79,11 +79,9 @@ variable "cluster_identifier" {
 }
 
 variable "db_engine_version" {
-  description = "The version of the Aurora engine"
+  description = "Aurora 엔진 버전 (null이면 8.0 계열 최신 버전 자동 조회)"
   type        = string
-  default     = "8.0.mysql_aurora.3.10.1" # 예시: MySQL 호환 버전
-  # Aurora MySQL의 최신 버전 확인 명령어:
-  # aws rds describe-db-engine-versions --region us-east-1 --engine aurora-mysql --query '*[]|[?SupportsParallelQuery == `true`].[EngineVersion]' --output text
+  default     = null # null이면 data.aws_rds_engine_version으로 자동 결정
 }
 
 variable "db_username" {
@@ -100,7 +98,7 @@ variable "db_password" {
 variable "db_instance_class" {
   description = "The instance class for the Aurora cluster instances"
   type        = string
-  default     = "db.r5.large"
+  default     = "db.r8g.large" # r8g = 현 세대 Graviton3 기반 (r5 대비 가격·성능 개선)
 }
 
 variable "allowed_cidr" {

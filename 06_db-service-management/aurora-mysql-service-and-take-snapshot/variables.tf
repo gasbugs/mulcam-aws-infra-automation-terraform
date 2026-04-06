@@ -82,7 +82,7 @@ variable "db_password" {
 variable "db_instance_class" {
   description = "Aurora 클러스터 인스턴스 클래스"
   type        = string
-  default     = "db.r5.large"
+  default     = "db.r8g.large"
 }
 
 variable "allowed_cidr" {

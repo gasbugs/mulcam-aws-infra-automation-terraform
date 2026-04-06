@@ -37,31 +37,37 @@ resource "aws_key_pair" "ec2_key_pair" {
   public_key = tls_private_key.ec2_key.public_key_openssh
 }
 
-# EC2 인스턴스를 위한 보안 그룹 — SSH와 HTTP 인바운드 허용
+# EC2 인스턴스를 위한 보안 그룹 — 규칙은 별도 리소스로 분리 (AWS provider 6.x 권장)
 resource "aws_security_group" "ec2_sg" {
   vpc_id      = var.vpc_id
   name_prefix = "ec2-public-sg-"
+  description = "Security group for EC2 DB client instance"
+}
 
-  # SSH 인바운드 허용 (학습 환경 — 실무에서는 특정 IP로 제한 권장)
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+# SSH 인바운드 허용 규칙 (학습 환경 — 실무에서는 특정 IP로 제한 권장)
+resource "aws_vpc_security_group_ingress_rule" "ec2_ssh" {
+  security_group_id = aws_security_group.ec2_sg.id
+  description       = "Allow SSH access (restrict to specific IP in production)"
+  cidr_ipv4         = "0.0.0.0/0" # 학습 환경용 전체 허용
+  from_port         = 22           # SSH 포트
+  to_port           = 22
+  ip_protocol       = "tcp"
+}
 
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # HTTP 접근 허용
-  }
+# HTTP 인바운드 허용 규칙
+resource "aws_vpc_security_group_ingress_rule" "ec2_http" {
+  security_group_id = aws_security_group.ec2_sg.id
+  description       = "Allow HTTP access"
+  cidr_ipv4         = "0.0.0.0/0" # HTTP 접근 허용
+  from_port         = 80           # HTTP 포트
+  to_port           = 80
+  ip_protocol       = "tcp"
+}
 
-  # 모든 아웃바운드 트래픽 허용
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+# 모든 아웃바운드 트래픽 허용 규칙
+resource "aws_vpc_security_group_egress_rule" "ec2_all" {
+  security_group_id = aws_security_group.ec2_sg.id
+  description       = "Allow all outbound traffic"
+  cidr_ipv4         = "0.0.0.0/0" # 모든 대상으로 출력 허용
+  ip_protocol       = "-1"        # 모든 프로토콜 허용
 }

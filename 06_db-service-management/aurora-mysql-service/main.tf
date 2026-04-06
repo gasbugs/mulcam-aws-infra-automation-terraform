@@ -7,6 +7,18 @@ module "vpc" {
   availability_zones = var.availability_zones # 가용 영역 리스트
 }
 
+# AWS에서 Aurora MySQL의 현재 기본(최신 권장) 엔진 버전을 자동으로 조회
+data "aws_rds_engine_version" "aurora_mysql" {
+  engine       = "aurora-mysql"
+  default_only = true # AWS가 지정한 기본 버전 선택
+}
+
+# 버전 우선순위: 사용자가 변수로 지정한 값 > 자동 조회한 최신 버전
+locals {
+  db_engine_version = coalesce(var.db_engine_version, data.aws_rds_engine_version.aurora_mysql.version)
+}
+
+# Amazon Linux 2023 최신 AMI를 자동으로 조회 — x86_64, HVM, EBS 조건으로 정확히 필터링
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -20,6 +32,16 @@ data "aws_ami" "al2023" {
     name   = "architecture"
     values = ["x86_64"]
   }
+
+  filter {
+    name   = "virtualization-type" # 반가상화 방식 — HVM이 현 세대 표준
+    values = ["hvm"]
+  }
+
+  filter {
+    name   = "root-device-type" # 루트 볼륨 유형 — EBS 기반만 선택
+    values = ["ebs"]
+  }
 }
 
 module "ec2" {
@@ -32,24 +54,33 @@ module "ec2" {
   instance_name = var.instance_name            # 인스턴스 이름
 }
 
+# Aurora MySQL 접속을 제어하는 보안 그룹 — 규칙은 별도 리소스로 분리 (AWS provider 6.x 권장)
 resource "aws_security_group" "rds_sg" {
   name        = "rds-security-group"    # 보안 그룹 이름
   description = "Allow database access" # 보안 그룹 설명
   vpc_id      = module.vpc.vpc_id       # VPC ID
 
-  ingress {
-    from_port   = 3306               # 시작 포트 (MySQL 기본 포트)
-    to_port     = 3306               # 종료 포트 (MySQL 기본 포트)
-    protocol    = "tcp"              # 프로토콜 (TCP)
-    cidr_blocks = [var.allowed_cidr] # 접근 허용 CIDR
+  tags = {
+    Name = "rds-security-group"
   }
+}
 
-  egress {
-    from_port   = 0             # 모든 포트 허용 (출력 트래픽)
-    to_port     = 0             # 모든 포트 허용 (출력 트래픽)
-    protocol    = "-1"          # 모든 프로토콜 허용
-    cidr_blocks = ["0.0.0.0/0"] # 모든 IP에 출력 허용
-  }
+# MySQL 3306 포트 인바운드 규칙 — 지정 CIDR에서만 Aurora 접속 허용
+resource "aws_vpc_security_group_ingress_rule" "rds_mysql" {
+  security_group_id = aws_security_group.rds_sg.id
+  description       = "Allow MySQL access from specified CIDR"
+  cidr_ipv4         = var.allowed_cidr # 접근 허용 CIDR
+  from_port         = 3306             # MySQL 기본 포트
+  to_port           = 3306
+  ip_protocol       = "tcp"
+}
+
+# 모든 아웃바운드 허용 규칙 — RDS가 외부로 응답할 수 있도록 허용
+resource "aws_vpc_security_group_egress_rule" "rds_all" {
+  security_group_id = aws_security_group.rds_sg.id
+  description       = "Allow all outbound traffic"
+  cidr_ipv4         = "0.0.0.0/0" # 모든 대상으로 출력 허용
+  ip_protocol       = "-1"        # 모든 프로토콜 허용
 }
 
 resource "aws_db_subnet_group" "this" {
@@ -64,7 +95,7 @@ resource "aws_db_subnet_group" "this" {
 resource "aws_rds_cluster" "my_aurora_cluster" {
   cluster_identifier           = var.cluster_identifier         # 클러스터 ID
   engine                       = "aurora-mysql"                 # 엔진 종류 (MySQL 호환 Aurora)
-  engine_version               = var.db_engine_version          # 엔진 버전
+  engine_version               = local.db_engine_version        # 엔진 버전
   master_username              = var.db_username                # 관리자 계정 이름
   master_password              = var.db_password                # 관리자 계정 비밀번호
   db_subnet_group_name         = aws_db_subnet_group.this.name  # DB 서브넷 그룹 이름
@@ -89,7 +120,7 @@ resource "aws_rds_cluster_instance" "my_aurora_instance" {
   cluster_identifier  = aws_rds_cluster.my_aurora_cluster.id                    # 속할 클러스터 ID
   instance_class      = var.db_instance_class                                   # 인스턴스 클래스
   engine              = "aurora-mysql"                                          # 엔진 (Aurora MySQL)
-  engine_version      = var.db_engine_version                                   # 엔진 버전
+  engine_version      = local.db_engine_version                                 # 엔진 버전
   publicly_accessible = false                                                   # 퍼블릭 액세스 비활성화
   apply_immediately   = true                                                    # 업데이트 즉시 적용
 
