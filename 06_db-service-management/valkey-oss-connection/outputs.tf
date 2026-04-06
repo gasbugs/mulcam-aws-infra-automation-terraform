@@ -10,7 +10,7 @@ output "dynamodb_table_name" {
 
 output "redis_cluster_endpoint" {
   description = "Endpoint of the Redis cluster"
-  value       = module.redis.redis_cluster_endpoint
+  value       = module.elasticache.redis_cluster_endpoint
 }
 
 output "ec2_instance_id" {

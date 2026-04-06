@@ -45,9 +45,9 @@ module "dynamodb" {
   project_name            = var.project_name
 }
 
-# Redis(Valkey) 모듈 — ElastiCache Replication Group 생성
-module "redis" {
-  source               = "./modules/redis"
+# ElastiCache(Valkey) 모듈 — Replication Group 생성
+module "elasticache" {
+  source               = "./modules/elasticache"
   vpc_id               = module.vpc.vpc_id
   private_subnet_ids   = module.vpc.private_subnets
   project_name         = var.project_name

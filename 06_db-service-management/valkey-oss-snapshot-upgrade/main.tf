@@ -1,16 +1,15 @@
-# VPC 모듈 생성
+# VPC 모듈 — 퍼블릭/프라이빗 서브넷이 포함된 네트워크 환경 구성
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "6.5.0" # 원하는 버전으로 설정
+  version = "6.5.0"
 
-  # VPC 이름 및 CIDR 범위 설정
   name                 = "example-vpc"
-  cidr                 = "10.0.0.0/16"
-  azs                  = ["${var.aws_region}a", "${var.aws_region}b"] # 가용 영역 설정
-  public_subnets       = ["10.0.1.0/24", "10.0.2.0/24"]               # 퍼블릭 서브넷 CIDR
-  private_subnets      = ["10.0.3.0/24", "10.0.4.0/24"]               # 프라이빗 서브넷 CIDR
-  enable_dns_hostnames = true                                         # DNS 호스트 이름 활성화
-  enable_dns_support   = true                                         # DNS 지원 활성화
+  cidr                 = var.vpc_cidr                                                  # tfvars에서 CIDR 주입
+  azs                  = [for az in var.availability_zones : "${var.aws_region}${az}"] # 가용 영역 조합
+  public_subnets       = var.public_subnet_cidrs                                       # 퍼블릭 서브넷 CIDR
+  private_subnets      = var.private_subnet_cidrs                                      # 프라이빗 서브넷 CIDR
+  enable_dns_hostnames = true                                                          # DNS 호스트 이름 활성화
+  enable_dns_support   = true                                                          # DNS 지원 활성화
 
   # 인터넷 게이트웨이 및 라우팅 테이블 자동 생성
   create_igw = true
@@ -20,17 +19,17 @@ module "vpc" {
   #single_nat_gateway = true # 하나의 NAT 게이트웨이만 사용할 경우 true 설정
 
   public_subnet_tags = {
-    Name = "example-public-subnet" # 퍼블릭 서브넷에 이름 태그 추가
+    Name = "example-public-subnet"
   }
 
   tags = {
-    Name = "example-vpc" # VPC에 이름 태그 추가
+    Name = "example-vpc"
   }
 }
 
-# Redis Module
-module "redis" {
-  source               = "./modules/redis"
+# ElastiCache(Valkey) 모듈 — Replication Group 생성
+module "elasticache" {
+  source               = "./modules/elasticache"
   vpc_id               = module.vpc.vpc_id
   private_subnet_ids   = module.vpc.private_subnets
   project_name         = var.project_name

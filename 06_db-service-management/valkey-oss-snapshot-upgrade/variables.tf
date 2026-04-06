@@ -55,7 +55,7 @@ variable "redis_num_cache_nodes" {
 variable "redis_parameter_group_name" {
   description = "Parameter group for Redis"
   type        = string
-  default     = "default.redis7"
+  default     = "default.valkey8" # Valkey 엔진 사용 시 적용되는 파라미터 그룹
 }
 
 variable "redis_auth_token" {
