@@ -83,11 +83,11 @@ valkey-oss-snapshot-upgrade/
 
 | 단계 | 작업 | 소요 시간 |
 |---|---|---|
-| 1단계 | 초기 배포 (`terraform apply`) | 약 8~12분 |
-| 2단계 | 노드 타입 업그레이드 (`terraform apply`) | 약 10~15분 |
-| 3단계 | 스냅샷 생성 후 복원 (`terraform apply`) | 약 10~15분 |
+| 1단계 | 초기 배포 (`terraform apply`) | 약 11분 |
+| 2단계 | 노드 타입 업그레이드 (`terraform apply`) | 약 13분 |
+| 3단계 | 스냅샷 생성 후 복원 (`terraform apply`) | 약 10~15분 (미측정) |
 | 4단계 | 리소스 정리 (`terraform destroy`) | 약 5분 |
-| **합계** | | **약 35~47분** |
+| **합계** | | **약 39분 (3단계 제외)** |
 
 ---
 
