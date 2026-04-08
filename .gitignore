@@ -42,6 +42,9 @@ terraform.rc
 # Ignore Python virtual environment
 .venv/
 
+# Ignore Python package build artifacts (pip install -e . 또는 pip install . 실행 시 생성)
+*.egg-info/
+
 # Ignore sensitive files
 accesskey.txt
 workshop-credentials-*.csv
