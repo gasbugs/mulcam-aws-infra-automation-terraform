@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+from datetime import date, timedelta
 from functools import partial
 
 import click
@@ -315,6 +316,67 @@ def _perform_rds_snapshot_cleanup(session, log: list, regions: list) -> dict:
     return result
 
 
+def _perform_ec2_cleanup(session, log: list, regions: list) -> dict:
+    """EC2 인스턴스를 종료(terminate)하고 완전히 종료될 때까지 대기한다.
+    EBS 볼륨·VPC 삭제보다 먼저 실행해야 한다."""
+    result: dict = {"terminated": [], "failed": []}
+    for region in regions:
+        try:
+            ec2 = session.client("ec2", region_name=region)
+            # 종료 전 상태의 인스턴스만 대상으로 조회
+            reservations = ec2.describe_instances(Filters=[
+                {"Name": "instance-state-name",
+                 "Values": ["pending", "running", "stopping", "stopped"]}
+            ]).get("Reservations", [])
+            instance_ids = [i["InstanceId"] for r in reservations for i in r["Instances"]]
+            if not instance_ids:
+                continue
+            try:
+                ec2.terminate_instances(InstanceIds=instance_ids)
+                log.append(f"  [EC2 정리] 종료 요청 완료 ({len(instance_ids)}개, 리전: {region}): "
+                           f"{', '.join(instance_ids)}")
+                # 종료 완료까지 대기 — EBS 볼륨이 available 상태로 전환돼야 삭제 가능
+                waiter = ec2.get_waiter("instance_terminated")
+                waiter.wait(
+                    InstanceIds=instance_ids,
+                    WaiterConfig={"Delay": 10, "MaxAttempts": 30},
+                )
+                for iid in instance_ids:
+                    log.append(f"  [EC2 정리] 종료 확인: {iid} (리전: {region})")
+                    result["terminated"].append(iid)
+            except ClientError as e:
+                log.append(f"  [EC2 정리] 종료 실패 (리전: {region}): {e}")
+                result["failed"].extend(instance_ids)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
+def _perform_ebs_volume_cleanup(session, log: list, regions: list) -> dict:
+    """available 상태의 EBS 볼륨을 삭제한다.
+    EC2 인스턴스가 종료된 후에 실행해야 한다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        try:
+            ec2 = session.client("ec2", region_name=region)
+            # 인스턴스에 연결되지 않은 볼륨만 삭제 가능
+            volumes = ec2.describe_volumes(
+                Filters=[{"Name": "status", "Values": ["available"]}]
+            ).get("Volumes", [])
+            for vol in volumes:
+                vol_id = vol["VolumeId"]
+                try:
+                    ec2.delete_volume(VolumeId=vol_id)
+                    log.append(f"  [EBS 정리] 볼륨 삭제 완료: {vol_id} (리전: {region})")
+                    result["deleted"].append(vol_id)
+                except ClientError as e:
+                    log.append(f"  [EBS 정리] 볼륨 삭제 실패 ({vol_id}): {e}")
+                    result["failed"].append(vol_id)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
 def _perform_vpc_cleanup(session, log: list, regions: list) -> dict:
     result: dict = {"deleted": [], "failed": []}
     for region in regions:
@@ -399,12 +461,16 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
         flush_log(log)
         record_result({"name": account_name, "account_id": account_id, "status": "error",
                        "warnings": [], "cf_cleanup": {}, "iam_cleanup": {}, "ami_cleanup": {},
-                       "snap_cleanup": {}, "rds_snap_cleanup": {}, "vpc_cleanup": {}})
+                       "snap_cleanup": {}, "rds_snap_cleanup": {}, "ec2_cleanup": {},
+                       "ebs_cleanup": {}, "vpc_cleanup": {}})
         return
 
     # 서비스별 병렬 검사
     warnings_found = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+    # max_workers를 줄여야 스피너 버벅임 없음
+    # 계정 11개 × 30 내부 스레드 = 330개 스레드가 동시에 GIL 경쟁 → 스피너 스레드 스케줄 밀림
+    # 10으로 줄이면 총 ~110개 수준으로 GIL 경쟁 완화
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = []
         for resource_name, config in RESOURCE_CHECKS.items():
             _, scope, _, _ = config
@@ -421,28 +487,35 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
                 log.append(f"  [오류] 서비스 검사 중 에러: {e}")
 
     # 삭제 단계 (--delete / clean 커맨드일 때만 실행)
+    # 순서 중요: EC2 종료 → EBS 볼륨 삭제 → VPC 삭제 (의존 관계 있음)
     if delete_mode:
         iam_cleanup      = _perform_iam_cleanup(session, log)
         cf_cleanup       = _perform_cloudfront_cleanup(session, log)
         ami_cleanup      = _perform_ami_cleanup(session, log, regions)
         snap_cleanup     = _perform_ebs_snapshot_cleanup(session, log, regions)
         rds_snap_cleanup = _perform_rds_snapshot_cleanup(session, log, regions)
+        # EC2 종료 먼저 — 종료 완료 대기 후 EBS/VPC 정리 진행
+        ec2_cleanup      = _perform_ec2_cleanup(session, log, regions)
+        ebs_cleanup      = _perform_ebs_volume_cleanup(session, log, regions)
         vpc_cleanup      = _perform_vpc_cleanup(session, log, regions)
     else:
-        iam_cleanup = cf_cleanup = ami_cleanup = snap_cleanup = rds_snap_cleanup = vpc_cleanup = {}
+        iam_cleanup = cf_cleanup = ami_cleanup = snap_cleanup = {}
+        rds_snap_cleanup = ec2_cleanup = ebs_cleanup = vpc_cleanup = {}
 
     # 정리 완료된 항목을 경고 목록에서 제외
     def _is_cleaned(w: str) -> bool:
         if not delete_mode:
             return False
         checks = [
-            ("CloudFront" in w,          cf_cleanup),
-            ("IAM 사용자" in w,           iam_cleanup),
-            ("AMI" in w,                 ami_cleanup),
-            ("EBS Snapshots" in w,       snap_cleanup),
-            ("RDS Snapshots" in w,       rds_snap_cleanup),
+            ("CloudFront" in w,            cf_cleanup),
+            ("IAM 사용자" in w,             iam_cleanup),
+            ("AMI" in w,                   ami_cleanup),
+            ("EBS Snapshots" in w,         snap_cleanup),
+            ("EBS Volumes" in w,           ebs_cleanup),
+            ("EC2 Instances" in w,         ec2_cleanup),
+            ("RDS Snapshots" in w,         rds_snap_cleanup),
             ("RDS Cluster Snapshots" in w, rds_snap_cleanup),
-            ("VPC" in w,                 vpc_cleanup),
+            ("VPC" in w,                   vpc_cleanup),
         ]
         for matches, cleanup in checks:
             if matches and not cleanup.get("failed"):
@@ -465,6 +538,7 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
                    "warnings": list(set(remaining)), "cf_cleanup": cf_cleanup,
                    "iam_cleanup": iam_cleanup, "ami_cleanup": ami_cleanup,
                    "snap_cleanup": snap_cleanup, "rds_snap_cleanup": rds_snap_cleanup,
+                   "ec2_cleanup": ec2_cleanup, "ebs_cleanup": ebs_cleanup,
                    "vpc_cleanup": vpc_cleanup})
 
 
@@ -486,20 +560,24 @@ def _print_audit_summary(total: int, delete_mode: bool = False) -> None:
     if delete_mode:
         def _sum(key, sub): return sum(len(r.get(key, {}).get(sub, [])) for r in results)
         stats = [
-            ("IAM 정리",   [("삭제 완료", _sum("iam_cleanup", "deleted")),
-                            ("삭제 실패", _sum("iam_cleanup", "failed"))]),
-            ("AMI 정리",   [("해지 완료", _sum("ami_cleanup", "deregistered")),
-                            ("해지 실패", _sum("ami_cleanup", "failed"))]),
-            ("EBS 스냅샷", [("삭제 완료", _sum("snap_cleanup", "deleted")),
-                            ("삭제 실패", _sum("snap_cleanup", "failed"))]),
-            ("RDS 스냅샷", [("삭제 완료", _sum("rds_snap_cleanup", "deleted")),
-                            ("삭제 실패", _sum("rds_snap_cleanup", "failed"))]),
-            ("VPC 정리",   [("삭제 완료", _sum("vpc_cleanup", "deleted")),
-                            ("삭제 실패", _sum("vpc_cleanup", "failed"))]),
-            ("CloudFront", [("삭제 완료",    _sum("cf_cleanup", "deleted")),
-                            ("비활성화 요청", _sum("cf_cleanup", "disabled")),
-                            ("실패",         _sum("cf_cleanup", "failed")),
-                            ("스킵",         _sum("cf_cleanup", "skipped"))]),
+            ("IAM 정리",      [("삭제 완료", _sum("iam_cleanup", "deleted")),
+                               ("삭제 실패", _sum("iam_cleanup", "failed"))]),
+            ("EC2 인스턴스",  [("종료 완료", _sum("ec2_cleanup", "terminated")),
+                               ("종료 실패", _sum("ec2_cleanup", "failed"))]),
+            ("EBS 볼륨",      [("삭제 완료", _sum("ebs_cleanup", "deleted")),
+                               ("삭제 실패", _sum("ebs_cleanup", "failed"))]),
+            ("AMI 정리",      [("해지 완료", _sum("ami_cleanup", "deregistered")),
+                               ("해지 실패", _sum("ami_cleanup", "failed"))]),
+            ("EBS 스냅샷",    [("삭제 완료", _sum("snap_cleanup", "deleted")),
+                               ("삭제 실패", _sum("snap_cleanup", "failed"))]),
+            ("RDS 스냅샷",    [("삭제 완료", _sum("rds_snap_cleanup", "deleted")),
+                               ("삭제 실패", _sum("rds_snap_cleanup", "failed"))]),
+            ("VPC 정리",      [("삭제 완료", _sum("vpc_cleanup", "deleted")),
+                               ("삭제 실패", _sum("vpc_cleanup", "failed"))]),
+            ("CloudFront",    [("삭제 완료",    _sum("cf_cleanup", "deleted")),
+                               ("비활성화 요청", _sum("cf_cleanup", "disabled")),
+                               ("실패",         _sum("cf_cleanup", "failed")),
+                               ("스킵",         _sum("cf_cleanup", "skipped"))]),
         ]
         for section, items in stats:
             if any(v for _, v in items):
