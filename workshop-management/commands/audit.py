@@ -58,9 +58,18 @@ RESOURCE_CHECKS = {
     "Image Builder Components":    ("imagebuilder", "regional", "list_components",                            "componentVersionList"),
     "Image Builder Infra Configs": ("imagebuilder", "regional", "list_infrastructure_configurations",         "infrastructureConfigurationSummaryList"),
     "Image Builder Dist Configs":  ("imagebuilder", "regional", "list_distribution_configurations",           "distributionConfigurationSummaryList"),
+    # API Gateway
+    "API Gateway (REST)":          ("apigateway",   "regional", "get_rest_apis",                               "items"),
+    "API Gateway (HTTP/WebSocket)": ("apigatewayv2", "regional", "get_apis",                                   "Items"),
+    # IAM (추가)
+    "IAM Roles (Custom)":          ("iam",          "global",   "list_roles",                                  "Roles"),
+    "IAM Policies (Custom)":       ("iam",          "global",   "list_policies",                               "Policies"),
+    # CloudWatch Logs
+    "CloudWatch Log Groups":       ("logs",         "regional", "describe_log_groups",                         "logGroups"),
 }
 
-EXPECTED_IAM_USERS = {"terraform-user-0", "terraform-user-1"}
+EXPECTED_IAM_USERS    = {"terraform-user-0", "terraform-user-1"}
+PROTECTED_IAM_POLICIES = {"TerraformWorkshop-Restricted-us-east-1"}
 
 
 # ── 단일 서비스 검사 ──────────────────────────────────────────────────────────
@@ -175,6 +184,21 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
             if resources:
                 return f"{resource_name} 리소스 {len(resources)}개 발견 (리전: {region})"
 
+        elif resource_name == "IAM Roles (Custom)":
+            # 서비스 연결 역할(service-linked role) 및 AWS 관리형 역할 제외
+            roles = [r for r in client.list_roles().get(result_key, [])
+                     if not r.get("Path", "").startswith("/aws-service-role/")
+                     and "AWSServiceRole" not in r.get("RoleName", "")]
+            if roles:
+                return f"IAM 역할 {len(roles)}개 발견: {', '.join(r['RoleName'] for r in roles)}"
+
+        elif resource_name == "IAM Policies (Custom)":
+            # Scope=Local → 고객 관리형 정책만 조회 (AWS 관리형 및 보호 정책 제외)
+            policies = [p for p in client.list_policies(Scope="Local").get(result_key, [])
+                        if p["PolicyName"] not in PROTECTED_IAM_POLICIES]
+            if policies:
+                return f"IAM 정책 {len(policies)}개 발견: {', '.join(p['PolicyName'] for p in policies)}"
+
         else:
             resources = getattr(client, api_call)().get(result_key, [])
             if resources:
@@ -223,9 +247,89 @@ def _force_delete_iam_user(iam, username: str, log: list) -> None:
     log.append(f"  [IAM 정리] 사용자 삭제 완료: {username}")
 
 
+def _force_delete_iam_role(iam, role_name: str, log: list) -> None:
+    """IAM 역할 삭제 전 종속 리소스(인스턴스 프로파일·정책·인라인 정책)를 모두 제거한다."""
+    # 인스턴스 프로파일 분리
+    try:
+        profiles = iam.list_instance_profiles_for_role(RoleName=role_name).get("InstanceProfiles", [])
+    except ClientError:
+        profiles = []
+    for profile in profiles:
+        profile_name = profile["InstanceProfileName"]
+        try:
+            iam.remove_role_from_instance_profile(InstanceProfileName=profile_name, RoleName=role_name)
+        except ClientError:
+            pass
+        try:
+            iam.delete_instance_profile(InstanceProfileName=profile_name)
+        except ClientError:
+            pass
+    # 관리형 정책 분리
+    try:
+        attached = iam.list_attached_role_policies(RoleName=role_name).get("AttachedPolicies", [])
+    except ClientError:
+        attached = []
+    for policy in attached:
+        try:
+            iam.detach_role_policy(RoleName=role_name, PolicyArn=policy["PolicyArn"])
+        except ClientError:
+            pass
+    # 인라인 정책 삭제
+    try:
+        policy_names = iam.list_role_policies(RoleName=role_name).get("PolicyNames", [])
+    except ClientError:
+        policy_names = []
+    for pname in policy_names:
+        try:
+            iam.delete_role_policy(RoleName=role_name, PolicyName=pname)
+        except ClientError:
+            pass
+    iam.delete_role(RoleName=role_name)
+    log.append(f"  [IAM 정리] 역할 삭제 완료: {role_name}")
+
+
+def _force_delete_iam_policy(iam, policy_arn: str, policy_name: str, log: list) -> None:
+    """고객 관리형 IAM 정책을 모든 엔티티에서 분리한 뒤 삭제한다."""
+    # 모든 연결 엔티티에서 분리
+    try:
+        entities = iam.list_entities_for_policy(PolicyArn=policy_arn)
+    except ClientError:
+        entities = {}
+    for user in entities.get("PolicyUsers", []):
+        try:
+            iam.detach_user_policy(UserName=user["UserName"], PolicyArn=policy_arn)
+        except ClientError:
+            pass
+    for group in entities.get("PolicyGroups", []):
+        try:
+            iam.detach_group_policy(GroupName=group["GroupName"], PolicyArn=policy_arn)
+        except ClientError:
+            pass
+    for role in entities.get("PolicyRoles", []):
+        try:
+            iam.detach_role_policy(RoleName=role["RoleName"], PolicyArn=policy_arn)
+        except ClientError:
+            pass
+    # 비기본 버전 삭제
+    try:
+        versions = iam.list_policy_versions(PolicyArn=policy_arn).get("Versions", [])
+    except ClientError:
+        versions = []
+    for ver in versions:
+        if not ver["IsDefaultVersion"]:
+            try:
+                iam.delete_policy_version(PolicyArn=policy_arn, VersionId=ver["VersionId"])
+            except ClientError:
+                pass
+    iam.delete_policy(PolicyArn=policy_arn)
+    log.append(f"  [IAM 정리] 정책 삭제 완료: {policy_name}")
+
+
 def _perform_iam_cleanup(session, log: list) -> dict:
     iam = session.client("iam")
     result: dict = {"deleted": [], "failed": []}
+
+    # ── 사용자 삭제 ──
     try:
         users = iam.list_users().get("Users", [])
     except ClientError as e:
@@ -241,6 +345,43 @@ def _perform_iam_cleanup(session, log: list) -> dict:
         except ClientError as e:
             log.append(f"  [IAM 정리] 사용자 삭제 실패 ({username}): {e}")
             result["failed"].append(username)
+
+    # ── 역할 삭제 (서비스 연결 역할 제외) ──
+    try:
+        roles = [r for r in iam.list_roles().get("Roles", [])
+                 if not r.get("Path", "").startswith("/aws-service-role/")
+                 and "AWSServiceRole" not in r.get("RoleName", "")]
+    except ClientError as e:
+        log.append(f"  [IAM 정리] 역할 목록 조회 실패: {e}")
+        roles = []
+    for role in roles:
+        role_name = role["RoleName"]
+        try:
+            _force_delete_iam_role(iam, role_name, log)
+            result["deleted"].append(role_name)
+        except ClientError as e:
+            log.append(f"  [IAM 정리] 역할 삭제 실패 ({role_name}): {e}")
+            result["failed"].append(role_name)
+
+    # ── 고객 관리형 정책 삭제 ──
+    try:
+        policies = iam.list_policies(Scope="Local").get("Policies", [])
+    except ClientError as e:
+        log.append(f"  [IAM 정리] 정책 목록 조회 실패: {e}")
+        policies = []
+    for policy in policies:
+        policy_arn  = policy["Arn"]
+        policy_name = policy["PolicyName"]
+        if policy_name in PROTECTED_IAM_POLICIES:
+            log.append(f"  [IAM 정리] 보호된 정책 — 스킵: {policy_name}")
+            continue
+        try:
+            _force_delete_iam_policy(iam, policy_arn, policy_name, log)
+            result["deleted"].append(policy_name)
+        except ClientError as e:
+            log.append(f"  [IAM 정리] 정책 삭제 실패 ({policy_name}): {e}")
+            result["failed"].append(policy_name)
+
     return result
 
 
@@ -631,6 +772,67 @@ def _perform_vpc_cleanup(session, log: list, regions: list) -> dict:
     return result
 
 
+def _perform_cloudwatch_cleanup(session, log: list, regions: list) -> dict:
+    """CloudWatch Logs 로그 그룹을 모두 삭제한다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        try:
+            logs_client = session.client("logs", region_name=region)
+            paginator = logs_client.get_paginator("describe_log_groups")
+            log_groups = []
+            for page in paginator.paginate():
+                log_groups.extend(page.get("logGroups", []))
+            for lg in log_groups:
+                lg_name = lg["logGroupName"]
+                try:
+                    logs_client.delete_log_group(logGroupName=lg_name)
+                    log.append(f"  [CloudWatch 정리] 로그 그룹 삭제 완료: {lg_name} (리전: {region})")
+                    result["deleted"].append(lg_name)
+                except ClientError as e:
+                    log.append(f"  [CloudWatch 정리] 로그 그룹 삭제 실패 ({lg_name}): {e}")
+                    result["failed"].append(lg_name)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
+def _perform_apigateway_cleanup(session, log: list, regions: list) -> dict:
+    """REST API(v1) 및 HTTP/WebSocket API(v2)를 모두 삭제한다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        # REST APIs (v1)
+        try:
+            apigw = session.client("apigateway", region_name=region)
+            rest_apis = apigw.get_rest_apis().get("items", [])
+            for api in rest_apis:
+                api_id = api["id"]
+                try:
+                    apigw.delete_rest_api(restApiId=api_id)
+                    log.append(f"  [API Gateway 정리] REST API 삭제 완료: {api.get('name', api_id)} (리전: {region})")
+                    result["deleted"].append(api_id)
+                except ClientError as e:
+                    log.append(f"  [API Gateway 정리] REST API 삭제 실패 ({api_id}): {e}")
+                    result["failed"].append(api_id)
+        except (ClientError, BotoCoreError):
+            pass
+        # HTTP/WebSocket APIs (v2)
+        try:
+            apigwv2 = session.client("apigatewayv2", region_name=region)
+            http_apis = apigwv2.get_apis().get("Items", [])
+            for api in http_apis:
+                api_id = api["ApiId"]
+                try:
+                    apigwv2.delete_api(ApiId=api_id)
+                    log.append(f"  [API Gateway 정리] HTTP/WS API 삭제 완료: {api.get('Name', api_id)} (리전: {region})")
+                    result["deleted"].append(api_id)
+                except ClientError as e:
+                    log.append(f"  [API Gateway 정리] HTTP/WS API 삭제 실패 ({api_id}): {e}")
+                    result["failed"].append(api_id)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
 def _perform_imagebuilder_cleanup(session, log: list, regions: list) -> dict:
     """Image Builder 파이프라인 → 레시피 → 컴포넌트 → 인프라 설정 → 배포 설정 순으로 삭제한다.
     파이프라인이 레시피·설정을 참조하므로 의존 순서를 지켜야 삭제가 가능하다."""
@@ -867,6 +1069,8 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
     # 순서: Lambda → IAM/CF/AMI/스냅샷 → EC2 종료 대기 → EIP 해제 → EBS → VPC(내부에서 NAT GW 처리)
     if delete_mode:
         lambda_cleanup      = _perform_lambda_cleanup(session, log, regions)
+        apigateway_cleanup  = _perform_apigateway_cleanup(session, log, regions)
+        cloudwatch_cleanup  = _perform_cloudwatch_cleanup(session, log, regions)
         iam_cleanup         = _perform_iam_cleanup(session, log)
         cf_cleanup          = _perform_cloudfront_cleanup(session, log)
         ami_cleanup         = _perform_ami_cleanup(session, log, regions)
@@ -885,6 +1089,7 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
         rds_snap_cleanup = ec2_cleanup = ebs_cleanup = {}
         eip_cleanup = lambda_cleanup = vpc_cleanup = {}
         imagebuilder_cleanup = codecommit_cleanup = s3_cleanup = {}
+        apigateway_cleanup = cloudwatch_cleanup = {}
 
     # 정리 완료된 항목을 경고 목록에서 제외
     def _is_cleaned(w: str) -> bool:
@@ -893,12 +1098,16 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
         checks = [
             ("CloudFront" in w,            cf_cleanup),
             ("IAM 사용자" in w,             iam_cleanup),
+            ("IAM 역할" in w,               iam_cleanup),
+            ("IAM 정책" in w,               iam_cleanup),
             ("AMI" in w,                   ami_cleanup),
             ("EBS Snapshots" in w,         snap_cleanup),
             ("EBS Volumes" in w,           ebs_cleanup),
             ("EC2 Instances" in w,         ec2_cleanup),
             ("EIP" in w,                   eip_cleanup),
             ("Lambda" in w,                lambda_cleanup),
+            ("API Gateway" in w,           apigateway_cleanup),
+            ("CloudWatch" in w,            cloudwatch_cleanup),
             ("RDS Snapshots" in w,         rds_snap_cleanup),
             ("RDS Cluster Snapshots" in w, rds_snap_cleanup),
             ("VPC" in w,                   vpc_cleanup),
@@ -929,6 +1138,8 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
                    "snap_cleanup": snap_cleanup, "rds_snap_cleanup": rds_snap_cleanup,
                    "ec2_cleanup": ec2_cleanup, "ebs_cleanup": ebs_cleanup,
                    "eip_cleanup": eip_cleanup, "lambda_cleanup": lambda_cleanup,
+                   "apigateway_cleanup": apigateway_cleanup,
+                   "cloudwatch_cleanup": cloudwatch_cleanup,
                    "vpc_cleanup": vpc_cleanup, "imagebuilder_cleanup": imagebuilder_cleanup,
                    "codecommit_cleanup": codecommit_cleanup, "s3_cleanup": s3_cleanup})
 
@@ -954,7 +1165,8 @@ def _delete_account(cred: dict) -> None:
         log += [f"  [오류] 리전 목록 조회 실패: {e}", f"{'='*60}"]
         flush_log(log)
         record_result({"name": account_name, "status": "error",
-                       "lambda_cleanup": {}, "iam_cleanup": {}, "cf_cleanup": {},
+                       "lambda_cleanup": {}, "apigateway_cleanup": {}, "cloudwatch_cleanup": {},
+                       "iam_cleanup": {}, "cf_cleanup": {},
                        "ami_cleanup": {}, "snap_cleanup": {}, "rds_snap_cleanup": {},
                        "ec2_cleanup": {}, "eip_cleanup": {}, "ebs_cleanup": {}, "vpc_cleanup": {},
                        "imagebuilder_cleanup": {}, "codecommit_cleanup": {}, "s3_cleanup": {}})
@@ -967,6 +1179,8 @@ def _delete_account(cred: dict) -> None:
 
     should_run = {
         "lambda_cleanup":        _found("Lambda"),
+        "apigateway_cleanup":    _found("API Gateway"),
+        "cloudwatch_cleanup":    _found("CloudWatch"),
         "iam_cleanup":           _found("IAM"),
         "cf_cleanup":            _found("CloudFront"),
         "ami_cleanup":           _found("AMI"),
@@ -984,6 +1198,8 @@ def _delete_account(cred: dict) -> None:
     # 실행할 작업만 필터링 (순서 유지: 의존 관계 반영)
     ALL_OPS = [
         ("lambda_cleanup",       lambda: _perform_lambda_cleanup(session, log, regions),        "Lambda 삭제 중"),
+        ("apigateway_cleanup",   lambda: _perform_apigateway_cleanup(session, log, regions),    "API Gateway 삭제 중"),
+        ("cloudwatch_cleanup",   lambda: _perform_cloudwatch_cleanup(session, log, regions),    "CloudWatch 로그 그룹 삭제 중"),
         ("iam_cleanup",          lambda: _perform_iam_cleanup(session, log),                    "IAM 정리 중"),
         ("cf_cleanup",           lambda: _perform_cloudfront_cleanup(session, log),             "CloudFront 정리 중"),
         ("ami_cleanup",          lambda: _perform_ami_cleanup(session, log, regions),           "AMI 정리 중"),
@@ -1037,6 +1253,10 @@ def _print_audit_summary(total: int, delete_mode: bool = False) -> None:
                                    ("삭제 실패", _sum("iam_cleanup", "failed"))]),
             ("Lambda 정리",       [("삭제 완료", _sum("lambda_cleanup", "deleted")),
                                    ("삭제 실패", _sum("lambda_cleanup", "failed"))]),
+            ("API Gateway 정리",  [("삭제 완료", _sum("apigateway_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("apigateway_cleanup", "failed"))]),
+            ("CloudWatch 정리",   [("삭제 완료", _sum("cloudwatch_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("cloudwatch_cleanup", "failed"))]),
             ("Image Builder 정리",[("삭제 완료", _sum("imagebuilder_cleanup", "deleted")),
                                    ("삭제 실패", _sum("imagebuilder_cleanup", "failed"))]),
             ("CodeCommit 정리",   [("삭제 완료", _sum("codecommit_cleanup", "deleted")),

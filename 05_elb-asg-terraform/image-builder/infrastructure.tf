@@ -15,7 +15,7 @@
 
 # CloudWatch 로그 그룹 — Image Builder 빌드 로그를 중앙에서 조회하고 보관하는 공간
 resource "aws_cloudwatch_log_group" "image_builder" {
-  name              = "/aws/imagebuilder/spring-boot-app-${var.environment}"
+  name              = "/aws/imagebuilder/spring-boot-app-${var.environment}-${random_string.suffix.result}"
   retention_in_days = 30 # 30일 후 자동 삭제하여 불필요한 로그 비용 방지
 
   tags = {
@@ -27,7 +27,7 @@ resource "aws_cloudwatch_log_group" "image_builder" {
 # Infrastructure Configuration — "어떤 EC2에서 빌드할지" 정의
 # Packer의 instance_type, ssh_username 설정에 해당
 resource "aws_imagebuilder_infrastructure_configuration" "spring_boot" {
-  name                          = "spring-boot-infra-config-${var.environment}"
+  name                          = "spring-boot-infra-config-${var.environment}-${random_string.suffix.result}"
   description                   = "Spring Boot AMI 빌드에 사용할 EC2 인스턴스 설정"
   instance_profile_name         = aws_iam_instance_profile.image_builder.name
   instance_types                = ["t3.micro"] # Packer와 동일한 인스턴스 타입

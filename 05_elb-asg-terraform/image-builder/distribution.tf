@@ -15,7 +15,7 @@
 # Distribution Configuration — 완성된 AMI를 어느 리전에, 어떤 이름으로 배포할지 정의
 # Packer의 ami_name, tags, region 설정에 해당
 resource "aws_imagebuilder_distribution_configuration" "spring_boot" {
-  name        = "spring-boot-dist-config-${var.environment}"
+  name        = "spring-boot-dist-config-${var.environment}-${random_string.suffix.result}"
   description = "완성된 Spring Boot AMI의 이름과 배포 리전을 정의합니다"
 
   distribution {

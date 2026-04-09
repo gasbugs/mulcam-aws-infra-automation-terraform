@@ -36,7 +36,7 @@ data "aws_ami" "al2023" {
 
 # Image Recipe — 베이스 AMI와 컴포넌트를 조합하여 "무엇을 만들지" 정의하는 설계도
 resource "aws_imagebuilder_image_recipe" "spring_boot" {
-  name        = "spring-boot-app-recipe-${var.environment}"
+  name        = "spring-boot-app-recipe-${var.environment}-${random_string.suffix.result}"
   description = "Amazon Linux 2023 위에 Java 17과 Spring Boot 앱을 설치한 AMI 설계도"
   version     = var.recipe_version
 

@@ -13,7 +13,7 @@
 # Image Builder 컴포넌트 1 — 빌드 도구(Java 17, Maven, Git) 및 앱 디렉토리 설치
 # CodeCommit에서 소스를 받아 빌드하려면 git과 maven이 모두 필요함
 resource "aws_imagebuilder_component" "install_java17" {
-  name        = "install-java17-${var.environment}"
+  name        = "install-java17-${var.environment}-${random_string.suffix.result}"
   description = "Amazon Linux 2023에 Java 17(Corretto), Maven, Git을 설치하고 앱 디렉토리를 준비합니다"
   platform    = "Linux"
   version     = var.recipe_version
@@ -63,7 +63,7 @@ resource "aws_imagebuilder_component" "install_java17" {
 # Image Builder 컴포넌트 2 — CodeCommit에서 소스 clone → Maven 빌드 → systemd 서비스 등록
 # Docker나 사전 빌드된 JAR 없이 Image Builder 인스턴스 내부에서 전체 빌드 파이프라인 수행
 resource "aws_imagebuilder_component" "deploy_spring_app" {
-  name        = "deploy-spring-app-${var.environment}"
+  name        = "deploy-spring-app-${var.environment}-${random_string.suffix.result}"
   description = "CodeCommit에서 소스를 clone하여 Maven으로 JAR를 빌드하고 systemd 서비스로 등록합니다"
   platform    = "Linux"
   version     = var.recipe_version

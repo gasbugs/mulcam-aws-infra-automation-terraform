@@ -19,7 +19,18 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
+}
+
+# 전역 랜덤 suffix — 동일 계정에서 여러 번 배포할 때 리소스 이름 충돌 방지
+resource "random_string" "suffix" {
+  length  = 6
+  upper   = false
+  special = false
 }
 
 provider "aws" {

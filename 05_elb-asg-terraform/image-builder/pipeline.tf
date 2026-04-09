@@ -17,7 +17,7 @@
 # Image Pipeline — Recipe, Infrastructure, Distribution을 하나로 연결하는 오케스트레이터
 # "언제, 무엇을, 어디서, 어디에" 빌드할지를 종합 정의
 resource "aws_imagebuilder_image_pipeline" "spring_boot" {
-  name        = "spring-boot-app-pipeline-${var.environment}"
+  name        = "spring-boot-app-pipeline-${var.environment}-${random_string.suffix.result}"
   description = "Spring Boot AMI를 자동으로 빌드하고 배포하는 Image Builder 파이프라인"
 
   # 빌드 설계도 (무엇을 만들지)

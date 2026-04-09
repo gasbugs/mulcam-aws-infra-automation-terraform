@@ -17,7 +17,7 @@
 
 # IAM 역할 — EC2 빌드 인스턴스가 Image Builder 서비스와 통신할 때 사용하는 권한 묶음
 resource "aws_iam_role" "image_builder" {
-  name = "ImageBuilderRole-${var.environment}"
+  name = "ImageBuilderRole-${var.environment}-${random_string.suffix.result}"
 
   # EC2 인스턴스가 이 역할을 맡을 수 있도록 허용 (Trust Policy)
   assume_role_policy = jsonencode({
@@ -51,7 +51,7 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
 
 # S3 로그 쓰기 권한 — 빌드 인스턴스가 AWSTOE 실행 로그를 S3에 업로드하기 위한 권한
 resource "aws_iam_policy" "s3_logs_write" {
-  name        = "ImageBuilderS3LogsWrite-${var.environment}"
+  name        = "ImageBuilderS3LogsWrite-${var.environment}-${random_string.suffix.result}"
   description = "Image Builder 빌드 인스턴스가 실행 로그를 S3 버킷에 기록할 수 있도록 허용"
 
   policy = jsonencode({
@@ -75,7 +75,7 @@ resource "aws_iam_role_policy_attachment" "s3_logs_write" {
 
 # CodeCommit 읽기 권한 — 빌드 인스턴스가 소스 코드를 git clone하기 위한 권한
 resource "aws_iam_policy" "codecommit_pull" {
-  name        = "ImageBuilderCodeCommitPull-${var.environment}"
+  name        = "ImageBuilderCodeCommitPull-${var.environment}-${random_string.suffix.result}"
   description = "Image Builder 빌드 인스턴스가 CodeCommit 저장소에서 소스를 pull할 수 있도록 허용"
 
   policy = jsonencode({
@@ -100,7 +100,7 @@ resource "aws_iam_role_policy_attachment" "codecommit_pull" {
 
 # 인스턴스 프로파일 — EC2에 IAM 역할을 붙이기 위한 래퍼 (EC2는 역할을 직접 받지 못하고 프로파일을 통해 받음)
 resource "aws_iam_instance_profile" "image_builder" {
-  name = "ImageBuilderInstanceProfile-${var.environment}"
+  name = "ImageBuilderInstanceProfile-${var.environment}-${random_string.suffix.result}"
   role = aws_iam_role.image_builder.name
 
   tags = {
