@@ -52,6 +52,7 @@ RESOURCE_CHECKS = {
     # image-builder 모듈 리소스 — S3 버킷·CodeCommit·Image Builder 파이프라인/레시피/컴포넌트/설정
     "S3 Buckets":                  ("s3",           "global",   "list_buckets",                               "Buckets"),
     "CodeCommit":                  ("codecommit",   "regional", "list_repositories",                          "repositories"),
+    "Image Builder Images":        ("imagebuilder", "regional", "list_images",                                "imageVersionList"),
     "Image Builder Pipelines":     ("imagebuilder", "regional", "list_image_pipelines",                       "imagePipelineList"),
     "Image Builder Recipes":       ("imagebuilder", "regional", "list_image_recipes",                         "imageRecipeSummaryList"),
     "Image Builder Components":    ("imagebuilder", "regional", "list_components",                            "componentVersionList"),
@@ -155,6 +156,12 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
             buckets = client.list_buckets().get(result_key, [])
             if buckets:
                 return f"[비용주의] {resource_name} 리소스 {len(buckets)}개 발견 (글로벌)"
+
+        elif resource_name == "Image Builder Images":
+            # 자신이 소유한 이미지(빌드 결과물)만 대상 — 파이프라인 실행으로 생성된 AMI 빌드 결과
+            resources = client.list_images(owner="Self").get(result_key, [])
+            if resources:
+                return f"{resource_name} 리소스 {len(resources)}개 발견 (리전: {region})"
 
         elif resource_name == "Image Builder Recipes":
             # 자신이 소유한 레시피만 대상 (AWS 관리 레시피 제외)
@@ -631,6 +638,27 @@ def _perform_imagebuilder_cleanup(session, log: list, regions: list) -> dict:
     for region in regions:
         try:
             ib = session.client("imagebuilder", region_name=region)
+
+            # 0단계: 이미지(빌드 결과물) 삭제 — 파이프라인 실행으로 생성된 이미지가 남아있으면
+            # 파이프라인 자체를 삭제할 수 없으므로(ResourceDependencyException) 가장 먼저 제거
+            for image_version in ib.list_images(owner="Self").get("imageVersionList", []):
+                image_version_arn = image_version["arn"]
+                try:
+                    builds = ib.list_image_build_versions(
+                        imageVersionArn=image_version_arn
+                    ).get("imageSummaryList", [])
+                    for build in builds:
+                        build_arn = build["arn"]
+                        try:
+                            ib.delete_image(imageBuildVersionArn=build_arn)
+                            log.append(f"  [Image Builder 정리] 이미지 삭제 완료: {image_version['name']} (리전: {region})")
+                            result["deleted"].append(build_arn)
+                        except ClientError as e:
+                            log.append(f"  [Image Builder 정리] 이미지 삭제 실패 ({build_arn}): {e}")
+                            result["failed"].append(build_arn)
+                except ClientError as e:
+                    log.append(f"  [Image Builder 정리] 이미지 빌드 버전 조회 실패 ({image_version_arn}): {e}")
+                    result["failed"].append(image_version_arn)
 
             # 1단계: 파이프라인 삭제 — 레시피·인프라·배포 설정을 참조하므로 가장 먼저 삭제
             for pipeline in ib.list_image_pipelines().get("imagePipelineList", []):

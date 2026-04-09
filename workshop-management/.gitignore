@@ -1,3 +1,9 @@
 # 이 폴더에 생성되는 모든 CSV 파일을 git에서 제외한다.
 # awsw cost --save, awsw setup 등에서 생성되는 자격증명/비용 리포트 파일이 포함된다.
 *.csv
+
+# 루트 .gitignore 에서 .claude/ 전체를 무시하지만,
+# 팀이 공유해야 하는 slash commands(스킬)는 예외로 허용한다.
+!.claude/
+!.claude/commands/
+!.claude/commands/*.md
