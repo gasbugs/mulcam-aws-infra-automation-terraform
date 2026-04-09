@@ -49,6 +49,14 @@ RESOURCE_CHECKS = {
     "ECR Repos":              ("ecr",             "regional", "describe_repositories",         "repositories"),
     "CodeBuild":              ("codebuild",       "regional", "list_projects",                 "projects"),
     "WAFv2 ACLs (Regional)":  ("wafv2",           "regional", "list_web_acls",                 "WebACLs"),
+    # image-builder 모듈 리소스 — S3 버킷·CodeCommit·Image Builder 파이프라인/레시피/컴포넌트/설정
+    "S3 Buckets":                  ("s3",           "global",   "list_buckets",                               "Buckets"),
+    "CodeCommit":                  ("codecommit",   "regional", "list_repositories",                          "repositories"),
+    "Image Builder Pipelines":     ("imagebuilder", "regional", "list_image_pipelines",                       "imagePipelineList"),
+    "Image Builder Recipes":       ("imagebuilder", "regional", "list_image_recipes",                         "imageRecipeSummaryList"),
+    "Image Builder Components":    ("imagebuilder", "regional", "list_components",                            "componentVersionList"),
+    "Image Builder Infra Configs": ("imagebuilder", "regional", "list_infrastructure_configurations",         "infrastructureConfigurationSummaryList"),
+    "Image Builder Dist Configs":  ("imagebuilder", "regional", "list_distribution_configurations",           "distributionConfigurationSummaryList"),
 }
 
 EXPECTED_IAM_USERS = {"terraform-user-0", "terraform-user-1"}
@@ -141,6 +149,24 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
             ]).get(result_key, [])
             if reservations:
                 return f"{resource_name} 리소스 {len(reservations)}개 발견 (리전: {region})"
+
+        elif resource_name == "S3 Buckets":
+            # S3는 글로벌 API — 모든 버킷을 한 번에 조회
+            buckets = client.list_buckets().get(result_key, [])
+            if buckets:
+                return f"[비용주의] {resource_name} 리소스 {len(buckets)}개 발견 (글로벌)"
+
+        elif resource_name == "Image Builder Recipes":
+            # 자신이 소유한 레시피만 대상 (AWS 관리 레시피 제외)
+            resources = client.list_image_recipes(owner="Self").get(result_key, [])
+            if resources:
+                return f"{resource_name} 리소스 {len(resources)}개 발견 (리전: {region})"
+
+        elif resource_name == "Image Builder Components":
+            # 자신이 소유한 컴포넌트만 대상 (AWS 관리 컴포넌트 제외)
+            resources = client.list_components(owner="Self").get(result_key, [])
+            if resources:
+                return f"{resource_name} 리소스 {len(resources)}개 발견 (리전: {region})"
 
         else:
             resources = getattr(client, api_call)().get(result_key, [])
@@ -598,6 +624,151 @@ def _perform_vpc_cleanup(session, log: list, regions: list) -> dict:
     return result
 
 
+def _perform_imagebuilder_cleanup(session, log: list, regions: list) -> dict:
+    """Image Builder 파이프라인 → 레시피 → 컴포넌트 → 인프라 설정 → 배포 설정 순으로 삭제한다.
+    파이프라인이 레시피·설정을 참조하므로 의존 순서를 지켜야 삭제가 가능하다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        try:
+            ib = session.client("imagebuilder", region_name=region)
+
+            # 1단계: 파이프라인 삭제 — 레시피·인프라·배포 설정을 참조하므로 가장 먼저 삭제
+            for pipeline in ib.list_image_pipelines().get("imagePipelineList", []):
+                arn = pipeline["arn"]
+                try:
+                    ib.delete_image_pipeline(imagePipelineArn=arn)
+                    log.append(f"  [Image Builder 정리] 파이프라인 삭제 완료: {pipeline['name']} (리전: {region})")
+                    result["deleted"].append(arn)
+                except ClientError as e:
+                    log.append(f"  [Image Builder 정리] 파이프라인 삭제 실패 ({arn}): {e}")
+                    result["failed"].append(arn)
+
+            # 2단계: 레시피 삭제 — 컴포넌트를 참조하므로 컴포넌트보다 먼저 삭제
+            for recipe in ib.list_image_recipes(owner="Self").get("imageRecipeSummaryList", []):
+                arn = recipe["arn"]
+                try:
+                    ib.delete_image_recipe(imageRecipeArn=arn)
+                    log.append(f"  [Image Builder 정리] 레시피 삭제 완료: {recipe['name']} (리전: {region})")
+                    result["deleted"].append(arn)
+                except ClientError as e:
+                    log.append(f"  [Image Builder 정리] 레시피 삭제 실패 ({arn}): {e}")
+                    result["failed"].append(arn)
+
+            # 3단계: 컴포넌트 삭제 — 버전 ARN에서 빌드 버전 목록을 조회하여 삭제
+            for comp_version in ib.list_components(owner="Self").get("componentVersionList", []):
+                comp_version_arn = comp_version["arn"]
+                try:
+                    builds = ib.list_component_build_versions(
+                        componentVersionArn=comp_version_arn
+                    ).get("componentSummaryList", [])
+                    for build in builds:
+                        build_arn = build["arn"]
+                        try:
+                            ib.delete_component(componentBuildVersionArn=build_arn)
+                            log.append(f"  [Image Builder 정리] 컴포넌트 삭제 완료: {comp_version['name']} (리전: {region})")
+                            result["deleted"].append(build_arn)
+                        except ClientError as e:
+                            log.append(f"  [Image Builder 정리] 컴포넌트 삭제 실패 ({build_arn}): {e}")
+                            result["failed"].append(build_arn)
+                except ClientError as e:
+                    log.append(f"  [Image Builder 정리] 컴포넌트 빌드 버전 조회 실패 ({comp_version_arn}): {e}")
+                    result["failed"].append(comp_version_arn)
+
+            # 4단계: 인프라 설정 삭제
+            for infra in ib.list_infrastructure_configurations().get("infrastructureConfigurationSummaryList", []):
+                arn = infra["arn"]
+                try:
+                    ib.delete_infrastructure_configuration(infrastructureConfigurationArn=arn)
+                    log.append(f"  [Image Builder 정리] 인프라 설정 삭제 완료: {infra['name']} (리전: {region})")
+                    result["deleted"].append(arn)
+                except ClientError as e:
+                    log.append(f"  [Image Builder 정리] 인프라 설정 삭제 실패 ({arn}): {e}")
+                    result["failed"].append(arn)
+
+            # 5단계: 배포 설정 삭제
+            for dist in ib.list_distribution_configurations().get("distributionConfigurationSummaryList", []):
+                arn = dist["arn"]
+                try:
+                    ib.delete_distribution_configuration(distributionConfigurationArn=arn)
+                    log.append(f"  [Image Builder 정리] 배포 설정 삭제 완료: {dist['name']} (리전: {region})")
+                    result["deleted"].append(arn)
+                except ClientError as e:
+                    log.append(f"  [Image Builder 정리] 배포 설정 삭제 실패 ({arn}): {e}")
+                    result["failed"].append(arn)
+
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
+def _perform_codecommit_cleanup(session, log: list, regions: list) -> dict:
+    """CodeCommit 저장소를 삭제한다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        try:
+            cc = session.client("codecommit", region_name=region)
+            repos = cc.list_repositories().get("repositories", [])
+            for repo in repos:
+                repo_name = repo["repositoryName"]
+                try:
+                    cc.delete_repository(repositoryName=repo_name)
+                    log.append(f"  [CodeCommit 정리] 저장소 삭제 완료: {repo_name} (리전: {region})")
+                    result["deleted"].append(repo_name)
+                except ClientError as e:
+                    log.append(f"  [CodeCommit 정리] 저장소 삭제 실패 ({repo_name}): {e}")
+                    result["failed"].append(repo_name)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
+def _perform_s3_cleanup(session, log: list) -> dict:
+    """S3 버킷 내 모든 객체(버전 포함)를 먼저 삭제한 뒤 버킷을 제거한다."""
+    result: dict = {"deleted": [], "failed": []}
+    try:
+        s3 = session.client("s3", region_name="us-east-1")
+        buckets = s3.list_buckets().get("Buckets", [])
+        for bucket in buckets:
+            bucket_name = bucket["Name"]
+            try:
+                # 버킷이 속한 리전을 조회하여 해당 리전 클라이언트로 작업 — 리전 불일치 시 접근 오류 방지
+                location = s3.get_bucket_location(Bucket=bucket_name).get("LocationConstraint") or "us-east-1"
+                s3r = session.client("s3", region_name=location)
+
+                # 버전 관리 여부 확인 후 객체 삭제
+                try:
+                    versioning_status = s3r.get_bucket_versioning(Bucket=bucket_name).get("Status", "")
+                    if versioning_status in ("Enabled", "Suspended"):
+                        # 버전 관리 버킷: 모든 버전과 삭제 마커를 한꺼번에 제거
+                        paginator = s3r.get_paginator("list_object_versions")
+                        for page in paginator.paginate(Bucket=bucket_name):
+                            to_delete = (
+                                [{"Key": v["Key"], "VersionId": v["VersionId"]} for v in page.get("Versions", [])] +
+                                [{"Key": m["Key"], "VersionId": m["VersionId"]} for m in page.get("DeleteMarkers", [])]
+                            )
+                            if to_delete:
+                                s3r.delete_objects(Bucket=bucket_name, Delete={"Objects": to_delete})
+                    else:
+                        # 일반 버킷: 객체 목록을 페이지 단위로 조회하여 삭제
+                        paginator = s3r.get_paginator("list_objects_v2")
+                        for page in paginator.paginate(Bucket=bucket_name):
+                            objects = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+                            if objects:
+                                s3r.delete_objects(Bucket=bucket_name, Delete={"Objects": objects})
+                except ClientError:
+                    pass
+
+                s3r.delete_bucket(Bucket=bucket_name)
+                log.append(f"  [S3 정리] 버킷 삭제 완료: {bucket_name}")
+                result["deleted"].append(bucket_name)
+            except ClientError as e:
+                log.append(f"  [S3 정리] 버킷 삭제 실패 ({bucket_name}): {e}")
+                result["failed"].append(bucket_name)
+    except (ClientError, BotoCoreError):
+        pass
+    return result
+
+
 # ── 계정별 처리 ────────────────────────────────────────────────────────────────
 
 def _audit_account(cred: dict, delete_mode: bool = False) -> None:
@@ -628,7 +799,8 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
         record_result({"name": account_name, "account_id": account_id, "status": "error",
                        "warnings": [], "cf_cleanup": {}, "iam_cleanup": {}, "ami_cleanup": {},
                        "snap_cleanup": {}, "rds_snap_cleanup": {}, "ec2_cleanup": {},
-                       "ebs_cleanup": {}, "eip_cleanup": {}, "lambda_cleanup": {}, "vpc_cleanup": {}})
+                       "ebs_cleanup": {}, "eip_cleanup": {}, "lambda_cleanup": {}, "vpc_cleanup": {},
+                       "imagebuilder_cleanup": {}, "codecommit_cleanup": {}, "s3_cleanup": {}})
         return
 
     # 서비스별 병렬 검사
@@ -666,21 +838,25 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
     # 삭제 단계 (--delete / clean 커맨드일 때만 실행)
     # 순서: Lambda → IAM/CF/AMI/스냅샷 → EC2 종료 대기 → EIP 해제 → EBS → VPC(내부에서 NAT GW 처리)
     if delete_mode:
-        lambda_cleanup   = _perform_lambda_cleanup(session, log, regions)
-        iam_cleanup      = _perform_iam_cleanup(session, log)
-        cf_cleanup       = _perform_cloudfront_cleanup(session, log)
-        ami_cleanup      = _perform_ami_cleanup(session, log, regions)
-        snap_cleanup     = _perform_ebs_snapshot_cleanup(session, log, regions)
-        rds_snap_cleanup = _perform_rds_snapshot_cleanup(session, log, regions)
+        lambda_cleanup      = _perform_lambda_cleanup(session, log, regions)
+        iam_cleanup         = _perform_iam_cleanup(session, log)
+        cf_cleanup          = _perform_cloudfront_cleanup(session, log)
+        ami_cleanup         = _perform_ami_cleanup(session, log, regions)
+        snap_cleanup        = _perform_ebs_snapshot_cleanup(session, log, regions)
+        rds_snap_cleanup    = _perform_rds_snapshot_cleanup(session, log, regions)
+        imagebuilder_cleanup = _perform_imagebuilder_cleanup(session, log, regions)
+        codecommit_cleanup  = _perform_codecommit_cleanup(session, log, regions)
+        s3_cleanup          = _perform_s3_cleanup(session, log)
         # EC2 종료 먼저 — 종료 완료 대기 후 EIP/EBS/VPC 정리 진행
-        ec2_cleanup      = _perform_ec2_cleanup(session, log, regions)
-        eip_cleanup      = _perform_eip_cleanup(session, log, regions)
-        ebs_cleanup      = _perform_ebs_volume_cleanup(session, log, regions)
-        vpc_cleanup      = _perform_vpc_cleanup(session, log, regions)
+        ec2_cleanup         = _perform_ec2_cleanup(session, log, regions)
+        eip_cleanup         = _perform_eip_cleanup(session, log, regions)
+        ebs_cleanup         = _perform_ebs_volume_cleanup(session, log, regions)
+        vpc_cleanup         = _perform_vpc_cleanup(session, log, regions)
     else:
         iam_cleanup = cf_cleanup = ami_cleanup = snap_cleanup = {}
         rds_snap_cleanup = ec2_cleanup = ebs_cleanup = {}
         eip_cleanup = lambda_cleanup = vpc_cleanup = {}
+        imagebuilder_cleanup = codecommit_cleanup = s3_cleanup = {}
 
     # 정리 완료된 항목을 경고 목록에서 제외
     def _is_cleaned(w: str) -> bool:
@@ -698,6 +874,9 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
             ("RDS Snapshots" in w,         rds_snap_cleanup),
             ("RDS Cluster Snapshots" in w, rds_snap_cleanup),
             ("VPC" in w,                   vpc_cleanup),
+            ("Image Builder" in w,         imagebuilder_cleanup),
+            ("CodeCommit" in w,            codecommit_cleanup),
+            ("S3 Buckets" in w,            s3_cleanup),
         ]
         for matches, cleanup in checks:
             if matches and not cleanup.get("failed"):
@@ -722,7 +901,8 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
                    "snap_cleanup": snap_cleanup, "rds_snap_cleanup": rds_snap_cleanup,
                    "ec2_cleanup": ec2_cleanup, "ebs_cleanup": ebs_cleanup,
                    "eip_cleanup": eip_cleanup, "lambda_cleanup": lambda_cleanup,
-                   "vpc_cleanup": vpc_cleanup})
+                   "vpc_cleanup": vpc_cleanup, "imagebuilder_cleanup": imagebuilder_cleanup,
+                   "codecommit_cleanup": codecommit_cleanup, "s3_cleanup": s3_cleanup})
 
 
 # ── 삭제 전용 계정 처리 ────────────────────────────────────────────────────────
@@ -748,7 +928,8 @@ def _delete_account(cred: dict) -> None:
         record_result({"name": account_name, "status": "error",
                        "lambda_cleanup": {}, "iam_cleanup": {}, "cf_cleanup": {},
                        "ami_cleanup": {}, "snap_cleanup": {}, "rds_snap_cleanup": {},
-                       "ec2_cleanup": {}, "eip_cleanup": {}, "ebs_cleanup": {}, "vpc_cleanup": {}})
+                       "ec2_cleanup": {}, "eip_cleanup": {}, "ebs_cleanup": {}, "vpc_cleanup": {},
+                       "imagebuilder_cleanup": {}, "codecommit_cleanup": {}, "s3_cleanup": {}})
         return
 
     # 감사에서 발견된 리소스 타입만 삭제 — 없는 타입은 API 호출조차 하지 않는다
@@ -757,30 +938,37 @@ def _delete_account(cred: dict) -> None:
         return any(keyword in w for w in warnings)
 
     should_run = {
-        "lambda_cleanup":   _found("Lambda"),
-        "iam_cleanup":      _found("IAM"),
-        "cf_cleanup":       _found("CloudFront"),
-        "ami_cleanup":      _found("AMI"),
-        "snap_cleanup":     _found("EBS Snapshots"),
-        "rds_snap_cleanup": _found("RDS Snapshots") or _found("RDS Cluster"),
-        "ec2_cleanup":      _found("EC2 Instances"),
-        "eip_cleanup":      _found("EIP"),
-        "ebs_cleanup":      _found("EBS Volumes"),
-        "vpc_cleanup":      _found("VPC"),
+        "lambda_cleanup":        _found("Lambda"),
+        "iam_cleanup":           _found("IAM"),
+        "cf_cleanup":            _found("CloudFront"),
+        "ami_cleanup":           _found("AMI"),
+        "snap_cleanup":          _found("EBS Snapshots"),
+        "rds_snap_cleanup":      _found("RDS Snapshots") or _found("RDS Cluster"),
+        "imagebuilder_cleanup":  _found("Image Builder"),
+        "codecommit_cleanup":    _found("CodeCommit"),
+        "s3_cleanup":            _found("S3 Buckets"),
+        "ec2_cleanup":           _found("EC2 Instances"),
+        "eip_cleanup":           _found("EIP"),
+        "ebs_cleanup":           _found("EBS Volumes"),
+        "vpc_cleanup":           _found("VPC"),
     }
 
     # 실행할 작업만 필터링 (순서 유지: 의존 관계 반영)
     ALL_OPS = [
-        ("lambda_cleanup",   lambda: _perform_lambda_cleanup(session, log, regions),      "Lambda 삭제 중"),
-        ("iam_cleanup",      lambda: _perform_iam_cleanup(session, log),                  "IAM 정리 중"),
-        ("cf_cleanup",       lambda: _perform_cloudfront_cleanup(session, log),           "CloudFront 정리 중"),
-        ("ami_cleanup",      lambda: _perform_ami_cleanup(session, log, regions),         "AMI 정리 중"),
-        ("snap_cleanup",     lambda: _perform_ebs_snapshot_cleanup(session, log, regions),"EBS 스냅샷 삭제 중"),
-        ("rds_snap_cleanup", lambda: _perform_rds_snapshot_cleanup(session, log, regions),"RDS 스냅샷 삭제 중"),
-        ("ec2_cleanup",      lambda: _perform_ec2_cleanup(session, log, regions),         "EC2 종료 중"),
-        ("eip_cleanup",      lambda: _perform_eip_cleanup(session, log, regions),         "EIP 해제 중"),
-        ("ebs_cleanup",      lambda: _perform_ebs_volume_cleanup(session, log, regions),  "EBS 볼륨 삭제 중"),
-        ("vpc_cleanup",      lambda: _perform_vpc_cleanup(session, log, regions),         "VPC 삭제 중"),
+        ("lambda_cleanup",       lambda: _perform_lambda_cleanup(session, log, regions),        "Lambda 삭제 중"),
+        ("iam_cleanup",          lambda: _perform_iam_cleanup(session, log),                    "IAM 정리 중"),
+        ("cf_cleanup",           lambda: _perform_cloudfront_cleanup(session, log),             "CloudFront 정리 중"),
+        ("ami_cleanup",          lambda: _perform_ami_cleanup(session, log, regions),           "AMI 정리 중"),
+        ("snap_cleanup",         lambda: _perform_ebs_snapshot_cleanup(session, log, regions),  "EBS 스냅샷 삭제 중"),
+        ("rds_snap_cleanup",     lambda: _perform_rds_snapshot_cleanup(session, log, regions),  "RDS 스냅샷 삭제 중"),
+        # Image Builder 의존 순서: 파이프라인 → 레시피 → 컴포넌트 → 인프라/배포 설정
+        ("imagebuilder_cleanup", lambda: _perform_imagebuilder_cleanup(session, log, regions),  "Image Builder 정리 중"),
+        ("codecommit_cleanup",   lambda: _perform_codecommit_cleanup(session, log, regions),    "CodeCommit 정리 중"),
+        ("s3_cleanup",           lambda: _perform_s3_cleanup(session, log),                     "S3 버킷 삭제 중"),
+        ("ec2_cleanup",          lambda: _perform_ec2_cleanup(session, log, regions),           "EC2 종료 중"),
+        ("eip_cleanup",          lambda: _perform_eip_cleanup(session, log, regions),           "EIP 해제 중"),
+        ("ebs_cleanup",          lambda: _perform_ebs_volume_cleanup(session, log, regions),    "EBS 볼륨 삭제 중"),
+        ("vpc_cleanup",          lambda: _perform_vpc_cleanup(session, log, regions),           "VPC 삭제 중"),
     ]
     active_ops = [(key, fn, label) for key, fn, label in ALL_OPS if should_run.get(key)]
     total_ops  = len(active_ops)
@@ -795,6 +983,7 @@ def _delete_account(cred: dict) -> None:
 
     log += [f"  [{account_name}] 정리 완료", f"{'='*60}"]
     flush_log(log)
+    # imagebuilder_cleanup / codecommit_cleanup / s3_cleanup 은 미실행 시 {} 로 초기화됨
     record_result({"name": account_name, "status": "cleaned", **cleanup_results})
 
 
@@ -816,28 +1005,34 @@ def _print_audit_summary(total: int, delete_mode: bool = False) -> None:
     if delete_mode:
         def _sum(key, sub): return sum(len(r.get(key, {}).get(sub, [])) for r in results)
         stats = [
-            ("IAM 정리",      [("삭제 완료", _sum("iam_cleanup", "deleted")),
-                               ("삭제 실패", _sum("iam_cleanup", "failed"))]),
-            ("Lambda 정리",   [("삭제 완료", _sum("lambda_cleanup", "deleted")),
-                               ("삭제 실패", _sum("lambda_cleanup", "failed"))]),
-            ("EC2 인스턴스",  [("종료 완료", _sum("ec2_cleanup", "terminated")),
-                               ("종료 실패", _sum("ec2_cleanup", "failed"))]),
-            ("EIP 정리",      [("해제 완료", _sum("eip_cleanup", "released")),
-                               ("해제 실패", _sum("eip_cleanup", "failed"))]),
-            ("EBS 볼륨",      [("삭제 완료", _sum("ebs_cleanup", "deleted")),
-                               ("삭제 실패", _sum("ebs_cleanup", "failed"))]),
-            ("AMI 정리",      [("해지 완료", _sum("ami_cleanup", "deregistered")),
-                               ("해지 실패", _sum("ami_cleanup", "failed"))]),
-            ("EBS 스냅샷",    [("삭제 완료", _sum("snap_cleanup", "deleted")),
-                               ("삭제 실패", _sum("snap_cleanup", "failed"))]),
-            ("RDS 스냅샷",    [("삭제 완료", _sum("rds_snap_cleanup", "deleted")),
-                               ("삭제 실패", _sum("rds_snap_cleanup", "failed"))]),
-            ("VPC 정리",      [("삭제 완료", _sum("vpc_cleanup", "deleted")),
-                               ("삭제 실패", _sum("vpc_cleanup", "failed"))]),
-            ("CloudFront",    [("삭제 완료",    _sum("cf_cleanup", "deleted")),
-                               ("비활성화 요청", _sum("cf_cleanup", "disabled")),
-                               ("실패",         _sum("cf_cleanup", "failed")),
-                               ("스킵",         _sum("cf_cleanup", "skipped"))]),
+            ("IAM 정리",          [("삭제 완료", _sum("iam_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("iam_cleanup", "failed"))]),
+            ("Lambda 정리",       [("삭제 완료", _sum("lambda_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("lambda_cleanup", "failed"))]),
+            ("Image Builder 정리",[("삭제 완료", _sum("imagebuilder_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("imagebuilder_cleanup", "failed"))]),
+            ("CodeCommit 정리",   [("삭제 완료", _sum("codecommit_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("codecommit_cleanup", "failed"))]),
+            ("S3 버킷 정리",      [("삭제 완료", _sum("s3_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("s3_cleanup", "failed"))]),
+            ("EC2 인스턴스",      [("종료 완료", _sum("ec2_cleanup", "terminated")),
+                                   ("종료 실패", _sum("ec2_cleanup", "failed"))]),
+            ("EIP 정리",          [("해제 완료", _sum("eip_cleanup", "released")),
+                                   ("해제 실패", _sum("eip_cleanup", "failed"))]),
+            ("EBS 볼륨",          [("삭제 완료", _sum("ebs_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("ebs_cleanup", "failed"))]),
+            ("AMI 정리",          [("해지 완료", _sum("ami_cleanup", "deregistered")),
+                                   ("해지 실패", _sum("ami_cleanup", "failed"))]),
+            ("EBS 스냅샷",        [("삭제 완료", _sum("snap_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("snap_cleanup", "failed"))]),
+            ("RDS 스냅샷",        [("삭제 완료", _sum("rds_snap_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("rds_snap_cleanup", "failed"))]),
+            ("VPC 정리",          [("삭제 완료", _sum("vpc_cleanup", "deleted")),
+                                   ("삭제 실패", _sum("vpc_cleanup", "failed"))]),
+            ("CloudFront",        [("삭제 완료",    _sum("cf_cleanup", "deleted")),
+                                   ("비활성화 요청", _sum("cf_cleanup", "disabled")),
+                                   ("실패",         _sum("cf_cleanup", "failed")),
+                                   ("스킵",         _sum("cf_cleanup", "skipped"))]),
         ]
         for section, items in stats:
             if any(v for _, v in items):
@@ -871,28 +1066,34 @@ def _print_delete_summary() -> None:
     def _sum(key, sub): return sum(len(r.get(key, {}).get(sub, [])) for r in results)
 
     stats = [
-        ("Lambda 정리",   [("삭제 완료", _sum("lambda_cleanup",   "deleted")),
-                           ("삭제 실패", _sum("lambda_cleanup",   "failed"))]),
-        ("IAM 정리",      [("삭제 완료", _sum("iam_cleanup",      "deleted")),
-                           ("삭제 실패", _sum("iam_cleanup",      "failed"))]),
-        ("EC2 인스턴스",  [("종료 완료", _sum("ec2_cleanup",      "terminated")),
-                           ("종료 실패", _sum("ec2_cleanup",      "failed"))]),
-        ("EIP 정리",      [("해제 완료", _sum("eip_cleanup",      "released")),
-                           ("해제 실패", _sum("eip_cleanup",      "failed"))]),
-        ("EBS 볼륨",      [("삭제 완료", _sum("ebs_cleanup",      "deleted")),
-                           ("삭제 실패", _sum("ebs_cleanup",      "failed"))]),
-        ("AMI 정리",      [("해지 완료", _sum("ami_cleanup",      "deregistered")),
-                           ("해지 실패", _sum("ami_cleanup",      "failed"))]),
-        ("EBS 스냅샷",    [("삭제 완료", _sum("snap_cleanup",     "deleted")),
-                           ("삭제 실패", _sum("snap_cleanup",     "failed"))]),
-        ("RDS 스냅샷",    [("삭제 완료", _sum("rds_snap_cleanup", "deleted")),
-                           ("삭제 실패", _sum("rds_snap_cleanup", "failed"))]),
-        ("VPC 정리",      [("삭제 완료", _sum("vpc_cleanup",      "deleted")),
-                           ("삭제 실패", _sum("vpc_cleanup",      "failed"))]),
-        ("CloudFront",    [("삭제 완료",    _sum("cf_cleanup", "deleted")),
-                           ("비활성화 요청", _sum("cf_cleanup", "disabled")),
-                           ("실패",         _sum("cf_cleanup", "failed")),
-                           ("스킵",         _sum("cf_cleanup", "skipped"))]),
+        ("Lambda 정리",       [("삭제 완료", _sum("lambda_cleanup",       "deleted")),
+                               ("삭제 실패", _sum("lambda_cleanup",       "failed"))]),
+        ("IAM 정리",          [("삭제 완료", _sum("iam_cleanup",          "deleted")),
+                               ("삭제 실패", _sum("iam_cleanup",          "failed"))]),
+        ("Image Builder 정리",[("삭제 완료", _sum("imagebuilder_cleanup", "deleted")),
+                               ("삭제 실패", _sum("imagebuilder_cleanup", "failed"))]),
+        ("CodeCommit 정리",   [("삭제 완료", _sum("codecommit_cleanup",   "deleted")),
+                               ("삭제 실패", _sum("codecommit_cleanup",   "failed"))]),
+        ("S3 버킷 정리",      [("삭제 완료", _sum("s3_cleanup",           "deleted")),
+                               ("삭제 실패", _sum("s3_cleanup",           "failed"))]),
+        ("EC2 인스턴스",      [("종료 완료", _sum("ec2_cleanup",          "terminated")),
+                               ("종료 실패", _sum("ec2_cleanup",          "failed"))]),
+        ("EIP 정리",          [("해제 완료", _sum("eip_cleanup",          "released")),
+                               ("해제 실패", _sum("eip_cleanup",          "failed"))]),
+        ("EBS 볼륨",          [("삭제 완료", _sum("ebs_cleanup",          "deleted")),
+                               ("삭제 실패", _sum("ebs_cleanup",          "failed"))]),
+        ("AMI 정리",          [("해지 완료", _sum("ami_cleanup",          "deregistered")),
+                               ("해지 실패", _sum("ami_cleanup",          "failed"))]),
+        ("EBS 스냅샷",        [("삭제 완료", _sum("snap_cleanup",         "deleted")),
+                               ("삭제 실패", _sum("snap_cleanup",         "failed"))]),
+        ("RDS 스냅샷",        [("삭제 완료", _sum("rds_snap_cleanup",     "deleted")),
+                               ("삭제 실패", _sum("rds_snap_cleanup",     "failed"))]),
+        ("VPC 정리",          [("삭제 완료", _sum("vpc_cleanup",          "deleted")),
+                               ("삭제 실패", _sum("vpc_cleanup",          "failed"))]),
+        ("CloudFront",        [("삭제 완료",    _sum("cf_cleanup", "deleted")),
+                               ("비활성화 요청", _sum("cf_cleanup", "disabled")),
+                               ("실패",         _sum("cf_cleanup", "failed")),
+                               ("스킵",         _sum("cf_cleanup", "skipped"))]),
     ]
 
     lines = ["", "=" * 60, "  [삭제 결과 요약]", "=" * 60]
