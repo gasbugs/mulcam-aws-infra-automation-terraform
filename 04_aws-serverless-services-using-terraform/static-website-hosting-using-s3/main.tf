@@ -8,6 +8,8 @@ resource "random_integer" "bucket_suffix" {
 resource "aws_s3_bucket" "static_site" {
   bucket = "${var.bucket_name}-${random_integer.bucket_suffix.result}" # 버킷 이름에 랜덤 숫자 추가
 
+  # force_destroy = true # 버킷 삭제 시 객체도 함께 삭제 (주의: 프로덕션 환경에서는 신중히 사용)
+
   tags = {
     Name        = var.bucket_name # 태그로 버킷 이름 설정
     Environment = var.environment # 환경에 대한 태그 지정 (예: dev, prod)

@@ -9,10 +9,12 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    # 키페어 생성을 위해 공개키/개인키 생성을 위한 tls 프로바이더를 사용
     tls = {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
+    # 내 로컬에 키페어 파일을 저장하기 위한 local 프로바이더를 사용
     local = {
       source  = "hashicorp/local"
       version = "~> 2.0"
@@ -25,21 +27,25 @@ provider "aws" {
   profile = var.aws_profile
 }
 
+# 현재 계정에서 사용 가능한 zone을 검색하는 기능
 data "aws_availability_zones" "available" {}
 
+# VPC 생성
 resource "aws_vpc" "my_vpc" {
   cidr_block           = var.vpc_cidr_block
-  enable_dns_hostnames = true
+  enable_dns_hostnames = true # DNS 기능 활성화
 
   tags = {
-    Name        = "MyVPC"
+    Name = "MyVPC" # AWS에서는 원래 Name 기능이 없었다. 
+    # 지금은 태그에 Name을 넣으면 콘솔에서 표기함.  
     Environment = var.environment
   }
 }
 
+# 서브넷 생성
 resource "aws_subnet" "public_subnet" {
-  vpc_id            = aws_vpc.my_vpc.id
-  cidr_block        = var.subnet_cidr_block
+  vpc_id            = aws_vpc.my_vpc.id     # 의존성을 명시해야 순서가 보장됨
+  cidr_block        = var.subnet_cidr_block # 10.0.1.0/24
   availability_zone = data.aws_availability_zones.available.names[0]
 
   tags = {
@@ -48,6 +54,7 @@ resource "aws_subnet" "public_subnet" {
   }
 }
 
+# IGW 생성
 resource "aws_internet_gateway" "my_igw" {
   vpc_id = aws_vpc.my_vpc.id
 
@@ -57,6 +64,7 @@ resource "aws_internet_gateway" "my_igw" {
   }
 }
 
+# 라우트 테이블 생성
 resource "aws_route_table" "public_route_table" {
   vpc_id = aws_vpc.my_vpc.id
 
@@ -71,17 +79,26 @@ resource "aws_route_table" "public_route_table" {
   }
 }
 
+# 라우트 테이블과 서브넷 연결
 resource "aws_route_table_association" "public_subnet_association" {
-  route_table_id = aws_route_table.public_route_table.id
-  subnet_id      = aws_subnet.public_subnet.id
+  route_table_id = aws_route_table.public_route_table.id # 어떤 라우트 테이블을
+  subnet_id      = aws_subnet.public_subnet.id           # 어떤 서브넷에 
 }
 
+# ec2 SW 방화벽 구성 
 resource "aws_security_group" "my_sg" {
   vpc_id = aws_vpc.my_vpc.id
 
   ingress {
     from_port   = 22
     to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -99,6 +116,7 @@ resource "aws_security_group" "my_sg" {
   }
 }
 
+# AL2023 최신 버전 사용 
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -114,6 +132,7 @@ data "aws_ami" "al2023" {
   }
 }
 
+# EC2 생성
 resource "aws_instance" "my_ec2" {
   ami                         = data.aws_ami.al2023.id            # 사용할 AMI ID 설정
   instance_type               = var.instance_type                 # EC2 인스턴스 유형
@@ -155,23 +174,27 @@ resource "aws_volume_attachment" "example_attachment" {
   instance_id = aws_instance.my_ec2.id           # 연결할 EC2 인스턴스 ID
 }
 
+# 키페어 이름은 내 계정에서 고유해야 함
 resource "random_string" "key_name_suffix" {
   length  = 8
-  special = false
-  upper   = false
+  special = false # 특수 문자 사용 여부
+  upper   = false # 대문자 사용 여부
 }
 
+# RSA 4096비트 키를 생성 
 resource "tls_private_key" "my_key" {
   algorithm = "RSA"
   rsa_bits  = 4096
 }
 
+# 로컬에서 프라이빗 키를 저장 
 resource "local_sensitive_file" "private_key" {
   content         = tls_private_key.my_key.private_key_pem
   filename        = "${path.module}/my-key.pem"
   file_permission = "0600"
 }
 
+# 새로 생성된 키를 AWS 키페어에 등록 (퍼블릭키만 등록)
 resource "aws_key_pair" "my_key_pair" {
   key_name   = "my-key-${random_string.key_name_suffix.result}"
   public_key = tls_private_key.my_key.public_key_openssh

@@ -13,10 +13,11 @@ provider "aws" {
   profile = "my-profile"
 }
 
+# 모듈을 불어오는 기능
 module "my_vpc" {
-  source = "./modules/vpc"
+  source = "./modules/vpc" # 참조하려는 모듈의 위치
 
-  # variables
+  # variables.tf에서 정의된 변수들에 값을 할당
   vpc_name   = "my-vpc"
   cidr_block = "10.0.0.0/16"
 }

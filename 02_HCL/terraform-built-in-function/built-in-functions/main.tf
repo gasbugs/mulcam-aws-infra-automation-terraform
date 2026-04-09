@@ -88,5 +88,5 @@ resource "random_integer" "example" {
 }
 
 output "random_integer_value" {
-  value = random_integer.example.result # 랜덤 정수 값 출력
+  value = "test-${random_integer.example.result}" # 랜덤 정수 값 출력
 }

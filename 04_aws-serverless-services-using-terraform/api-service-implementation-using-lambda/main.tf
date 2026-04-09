@@ -46,6 +46,7 @@ resource "aws_iam_role" "lambda_execution_role" {
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   role       = aws_iam_role.lambda_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  # AWSLambdaBasicExecutionRole 정책은 Lambda가 CloudWatch Logs에 로그를 쓸 수 있도록 허용
 }
 
 # S3 읽기 권한 정책 생성
@@ -120,8 +121,9 @@ resource "aws_s3_object" "lambda_hello_world" {
 resource "aws_lambda_function" "my_lambda" {
   function_name = "${var.environment}-hello-world"
   handler       = "lambda_function.handler"
-  runtime       = "python3.12" # python3.10은 2025년 11월 Lambda 지원 종료
-  role          = aws_iam_role.lambda_execution_role.arn
+  # 람다는 파이썬 외, Java, Node.js, Go 등 다양한 런타임 지원
+  runtime = "python3.12" # python3.10은 2025년 11월 Lambda 지원 종료
+  role    = aws_iam_role.lambda_execution_role.arn
 
   s3_bucket = aws_s3_bucket.lambda_bucket.id
   s3_key    = aws_s3_object.lambda_hello_world.key

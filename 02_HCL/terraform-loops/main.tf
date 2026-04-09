@@ -4,7 +4,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws" # AWS 프로바이더의 소스를 HashiCorp 레지스트리로 지정
-      version = "~> 6.0"     # AWS 프로바이더의 최소 버전을 6.19.0 이상으로 설정
+      version = "~> 6.0"        # AWS 프로바이더의 최소 버전을 6.19.0 이상으로 설정
     }
   }
 }
@@ -38,7 +38,7 @@ resource "aws_instance" "example1" {
 
   tags = {
     Name = "Example-Instance-${count.index}" # 각 인스턴스에 고유한 이름 태그 지정
-    # (예: "Example-Instance-0", "Example-Instance-1")
+    # (예: "Example-Instance-0", "Example-Instance-1", "Example-Instance-2")
   }
 }
 
@@ -50,7 +50,7 @@ resource "aws_instance" "example2" {
 
   tags = {
     Name = "Example-Instance-${each.key}" # 각 환경에 맞는 고유 이름 태그 지정
-    # (예: "Example-Instance-dev")
+    # (예: "Example-Instance-dev", "Example-Instance-staging", "Example-Instance-prod")
   }
 }
 
