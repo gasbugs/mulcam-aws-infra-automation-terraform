@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import time
 from datetime import date, timedelta
 from functools import partial
 
@@ -316,6 +317,67 @@ def _perform_rds_snapshot_cleanup(session, log: list, regions: list) -> dict:
     return result
 
 
+def _perform_lambda_cleanup(session, log: list, regions: list) -> dict:
+    """모든 Lambda 함수를 삭제한다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        try:
+            lam = session.client("lambda", region_name=region)
+            functions = lam.list_functions().get("Functions", [])
+            for fn in functions:
+                fn_name = fn["FunctionName"]
+                try:
+                    lam.delete_function(FunctionName=fn_name)
+                    log.append(f"  [Lambda 정리] 삭제 완료: {fn_name} (리전: {region})")
+                    result["deleted"].append(fn_name)
+                except ClientError as e:
+                    log.append(f"  [Lambda 정리] 삭제 실패 ({fn_name}): {e}")
+                    result["failed"].append(fn_name)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
+def _perform_eip_cleanup(session, log: list, regions: list) -> dict:
+    """EC2 인스턴스 종료 후 남은 EIP를 해제한다.
+    NAT Gateway에 연결된 EIP는 건너뜀 — _perform_vpc_cleanup에서 NAT GW 삭제 후 처리한다."""
+    result: dict = {"released": [], "failed": []}
+    for region in regions:
+        try:
+            ec2 = session.client("ec2", region_name=region)
+            addresses = ec2.describe_addresses().get("Addresses", [])
+            for addr in addresses:
+                alloc_id = addr.get("AllocationId")
+                assoc_id = addr.get("AssociationId")
+                eni_id    = addr.get("NetworkInterfaceId")
+                if not alloc_id:
+                    continue
+                # NAT GW에 연결된 EIP인지 확인 — NAT GW ENI는 InterfaceType이 "nat_gateway"
+                if eni_id:
+                    try:
+                        eni_type = ec2.describe_network_interfaces(
+                            NetworkInterfaceIds=[eni_id]
+                        )["NetworkInterfaces"][0].get("InterfaceType", "")
+                        if eni_type == "nat_gateway":
+                            log.append(f"  [EIP 정리] NAT GW EIP는 VPC 정리 단계에서 처리: {alloc_id}")
+                            continue
+                    except ClientError:
+                        pass
+                try:
+                    # 인스턴스 등에 연결된 경우 먼저 분리 후 해제
+                    if assoc_id:
+                        ec2.disassociate_address(AssociationId=assoc_id)
+                    ec2.release_address(AllocationId=alloc_id)
+                    log.append(f"  [EIP 정리] 해제 완료: {alloc_id} (리전: {region})")
+                    result["released"].append(alloc_id)
+                except ClientError as e:
+                    log.append(f"  [EIP 정리] 해제 실패 ({alloc_id}): {e}")
+                    result["failed"].append(alloc_id)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
 def _perform_ec2_cleanup(session, log: list, regions: list) -> dict:
     """EC2 인스턴스를 종료(terminate)하고 완전히 종료될 때까지 대기한다.
     EBS 볼륨·VPC 삭제보다 먼저 실행해야 한다."""
@@ -388,6 +450,32 @@ def _perform_vpc_cleanup(session, log: list, regions: list) -> dict:
             for vpc in vpcs:
                 vpc_id = vpc["VpcId"]
                 try:
+                    # NAT Gateway 삭제 — 서브넷 삭제 전에 먼저 제거해야 서브넷이 지워짐
+                    nat_gws = ec2.describe_nat_gateways(
+                        Filters=[{"Name": "vpc-id", "Values": [vpc_id]},
+                                 {"Name": "state", "Values": ["available", "pending"]}]
+                    ).get("NatGateways", [])
+                    if nat_gws:
+                        nat_ids = [n["NatGatewayId"] for n in nat_gws]
+                        for nat_id in nat_ids:
+                            ec2.delete_nat_gateway(NatGatewayId=nat_id)
+                        # NAT GW가 완전히 삭제될 때까지 대기 (EIP 해제 가능 상태가 돼야 함)
+                        waiter = ec2.get_waiter("nat_gateway_deleted")
+                        waiter.wait(
+                            NatGatewayIds=nat_ids,
+                            WaiterConfig={"Delay": 10, "MaxAttempts": 30},
+                        )
+                        # NAT GW에 연결됐던 EIP 해제
+                        for nat in nat_gws:
+                            for addr in nat.get("NatGatewayAddresses", []):
+                                alloc_id = addr.get("AllocationId")
+                                if alloc_id:
+                                    try:
+                                        ec2.release_address(AllocationId=alloc_id)
+                                        log.append(f"  [VPC 정리] NAT GW EIP 해제: {alloc_id} (리전: {region})")
+                                    except ClientError:
+                                        pass
+                        log.append(f"  [VPC 정리] NAT Gateway 삭제 완료 ({len(nat_ids)}개, 리전: {region})")
                     # IGW 분리/삭제
                     for igw in ec2.describe_internet_gateways(
                         Filters=[{"Name": "attachment.vpc-id", "Values": [vpc_id]}]
@@ -401,6 +489,17 @@ def _perform_vpc_cleanup(session, log: list, regions: list) -> dict:
                     ).get("VpcEndpoints", [])
                     if eps:
                         ec2.delete_vpc_endpoints(VpcEndpointIds=[ep["VpcEndpointId"] for ep in eps])
+                    # 잔여 ENI 삭제 — Lambda/ALB 등이 생성한 인터페이스가 서브넷 삭제를 막음
+                    # available 상태(어디에도 연결 안 된) ENI만 삭제 가능
+                    for eni in ec2.describe_network_interfaces(
+                        Filters=[{"Name": "vpc-id",  "Values": [vpc_id]},
+                                 {"Name": "status",  "Values": ["available"]}]
+                    ).get("NetworkInterfaces", []):
+                        try:
+                            ec2.delete_network_interface(NetworkInterfaceId=eni["NetworkInterfaceId"])
+                            log.append(f"  [VPC 정리] 잔여 ENI 삭제: {eni['NetworkInterfaceId']} (리전: {region})")
+                        except ClientError:
+                            pass
                     # 서브넷 삭제
                     for subnet in ec2.describe_subnets(
                         Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
@@ -412,10 +511,76 @@ def _perform_vpc_cleanup(session, log: list, regions: list) -> dict:
                     ).get("RouteTables", []):
                         if not any(a.get("Main") for a in rt.get("Associations", [])):
                             ec2.delete_route_table(RouteTableId=rt["RouteTableId"])
-                    # 비기본 보안 그룹 삭제
-                    for sg in ec2.describe_security_groups(
+                    # VPC 피어링 연결 종료 — 이 VPC가 requester 또는 accepter인 경우 모두 처리
+                    for filters in [
+                        [{"Name": "requester-vpc-info.vpc-id", "Values": [vpc_id]}],
+                        [{"Name": "accepter-vpc-info.vpc-id",  "Values": [vpc_id]}],
+                    ]:
+                        for p in ec2.describe_vpc_peering_connections(
+                            Filters=filters + [{"Name": "status-code",
+                                                "Values": ["active", "pending-acceptance", "provisioning"]}]
+                        ).get("VpcPeeringConnections", []):
+                            try:
+                                ec2.delete_vpc_peering_connection(
+                                    VpcPeeringConnectionId=p["VpcPeeringConnectionId"])
+                                log.append(f"  [VPC 정리] 피어링 연결 삭제: {p['VpcPeeringConnectionId']}")
+                            except ClientError:
+                                pass
+                    # VPN Gateway 분리 — VGW가 연결된 채로는 VPC 삭제 불가
+                    # detach_vpn_gateway는 비동기라 분리 완료까지 폴링해야 한다
+                    for vgw in ec2.describe_vpn_gateways(
+                        Filters=[{"Name": "attachment.vpc-id", "Values": [vpc_id]}]
+                    ).get("VpnGateways", []):
+                        vgw_id = vgw["VpnGatewayId"]
+                        try:
+                            ec2.detach_vpn_gateway(VpnGatewayId=vgw_id, VpcId=vpc_id)
+                            log.append(f"  [VPC 정리] VPN Gateway 분리 요청: {vgw_id} (리전: {region})")
+                        except ClientError:
+                            pass
+                        # 분리 완료까지 대기 (detaching → detached)
+                        for _ in range(30):
+                            time.sleep(5)
+                            attachments = ec2.describe_vpn_gateways(
+                                VpnGatewayIds=[vgw_id]
+                            )["VpnGateways"][0].get("VpcAttachments", [])
+                            still_attached = [
+                                a for a in attachments
+                                if a.get("VpcId") == vpc_id and a.get("State") != "detached"
+                            ]
+                            if not still_attached:
+                                log.append(f"  [VPC 정리] VPN Gateway 분리 완료: {vgw_id}")
+                                break
+                        else:
+                            log.append(f"  [VPC 정리] VPN Gateway 분리 대기 시간 초과: {vgw_id}")
+                    # Egress-only IGW 삭제 (IPv6 아웃바운드 게이트웨이)
+                    for eigw in ec2.describe_egress_only_internet_gateways(
+                        Filters=[{"Name": "attachment.vpc-id", "Values": [vpc_id]}]
+                    ).get("EgressOnlyInternetGateways", []):
+                        try:
+                            ec2.delete_egress_only_internet_gateway(
+                                EgressOnlyInternetGatewayId=eigw["EgressOnlyInternetGatewayId"])
+                        except ClientError:
+                            pass
+                    # 보안 그룹 간 상호 참조 규칙 제거 — SG-A↔SG-B 참조 시 삭제 불가
+                    sgs = ec2.describe_security_groups(
                         Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
-                    ).get("SecurityGroups", []):
+                    ).get("SecurityGroups", [])
+                    for sg in sgs:
+                        sg_id = sg["GroupId"]
+                        cross_in  = [r for r in sg.get("IpPermissions",       []) if r.get("UserIdGroupPairs")]
+                        cross_out = [r for r in sg.get("IpPermissionsEgress", []) if r.get("UserIdGroupPairs")]
+                        if cross_in:
+                            try:
+                                ec2.revoke_security_group_ingress(GroupId=sg_id, IpPermissions=cross_in)
+                            except ClientError:
+                                pass
+                        if cross_out:
+                            try:
+                                ec2.revoke_security_group_egress(GroupId=sg_id, IpPermissions=cross_out)
+                            except ClientError:
+                                pass
+                    # 비기본 보안 그룹 삭제
+                    for sg in sgs:
                         if sg["GroupName"] != "default":
                             try:
                                 ec2.delete_security_group(GroupId=sg["GroupId"])
@@ -437,6 +602,7 @@ def _perform_vpc_cleanup(session, log: list, regions: list) -> dict:
 
 def _audit_account(cred: dict, delete_mode: bool = False) -> None:
     """단일 계정의 잔여 리소스를 병렬 스캔하고, delete_mode=True 이면 정리까지 수행한다."""
+    update_fn = cred.get("_update_progress")  # 프로그레스바 갱신 콜백 (run_parallel이 주입)
     set_current_account(cred["name"])  # 지연 출력 모드에서 계정 로그 버퍼 연결
     account_name = cred["name"]
     log = ["", f"{'='*60}", f"  [{account_name} / Key: {cred['access_key'][:5]}...] 계정 검사 시작"]
@@ -462,45 +628,59 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
         record_result({"name": account_name, "account_id": account_id, "status": "error",
                        "warnings": [], "cf_cleanup": {}, "iam_cleanup": {}, "ami_cleanup": {},
                        "snap_cleanup": {}, "rds_snap_cleanup": {}, "ec2_cleanup": {},
-                       "ebs_cleanup": {}, "vpc_cleanup": {}})
+                       "ebs_cleanup": {}, "eip_cleanup": {}, "lambda_cleanup": {}, "vpc_cleanup": {}})
         return
 
     # 서비스별 병렬 검사
+    # max_workers=10: 계정 11개 × 10 내부 스레드 = ~110개로 GIL 경쟁 완화
     warnings_found = []
-    # max_workers를 줄여야 스피너 버벅임 없음
-    # 계정 11개 × 30 내부 스레드 = 330개 스레드가 동시에 GIL 경쟁 → 스피너 스레드 스케줄 밀림
-    # 10으로 줄이면 총 ~110개 수준으로 GIL 경쟁 완화
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = []
+        # future → resource_name 맵으로 어떤 서비스가 완료됐는지 추적한다
+        futures_map: dict = {}
         for resource_name, config in RESOURCE_CHECKS.items():
             _, scope, _, _ = config
             if scope == "global":
-                futures.append(executor.submit(_check_single_service, session, resource_name, config, "us-east-1"))
+                f = executor.submit(_check_single_service, session, resource_name, config, "us-east-1")
+                futures_map[f] = resource_name
             else:
                 for region in regions:
-                    futures.append(executor.submit(_check_single_service, session, resource_name, config, region))
-        for future in concurrent.futures.as_completed(futures):
+                    f = executor.submit(_check_single_service, session, resource_name, config, region)
+                    futures_map[f] = resource_name
+
+        total_tasks = len(futures_map)
+        completed_tasks = 0
+
+        for future in concurrent.futures.as_completed(futures_map):
+            resource_name = futures_map[future]
             try:
                 if warning := future.result():
                     warnings_found.append(warning)
             except Exception as e:
                 log.append(f"  [오류] 서비스 검사 중 에러: {e}")
+            finally:
+                completed_tasks += 1
+                if update_fn:
+                    pct = int(completed_tasks / total_tasks * 100)
+                    update_fn(pct, f"{resource_name} 검사 중")
 
     # 삭제 단계 (--delete / clean 커맨드일 때만 실행)
-    # 순서 중요: EC2 종료 → EBS 볼륨 삭제 → VPC 삭제 (의존 관계 있음)
+    # 순서: Lambda → IAM/CF/AMI/스냅샷 → EC2 종료 대기 → EIP 해제 → EBS → VPC(내부에서 NAT GW 처리)
     if delete_mode:
+        lambda_cleanup   = _perform_lambda_cleanup(session, log, regions)
         iam_cleanup      = _perform_iam_cleanup(session, log)
         cf_cleanup       = _perform_cloudfront_cleanup(session, log)
         ami_cleanup      = _perform_ami_cleanup(session, log, regions)
         snap_cleanup     = _perform_ebs_snapshot_cleanup(session, log, regions)
         rds_snap_cleanup = _perform_rds_snapshot_cleanup(session, log, regions)
-        # EC2 종료 먼저 — 종료 완료 대기 후 EBS/VPC 정리 진행
+        # EC2 종료 먼저 — 종료 완료 대기 후 EIP/EBS/VPC 정리 진행
         ec2_cleanup      = _perform_ec2_cleanup(session, log, regions)
+        eip_cleanup      = _perform_eip_cleanup(session, log, regions)
         ebs_cleanup      = _perform_ebs_volume_cleanup(session, log, regions)
         vpc_cleanup      = _perform_vpc_cleanup(session, log, regions)
     else:
         iam_cleanup = cf_cleanup = ami_cleanup = snap_cleanup = {}
-        rds_snap_cleanup = ec2_cleanup = ebs_cleanup = vpc_cleanup = {}
+        rds_snap_cleanup = ec2_cleanup = ebs_cleanup = {}
+        eip_cleanup = lambda_cleanup = vpc_cleanup = {}
 
     # 정리 완료된 항목을 경고 목록에서 제외
     def _is_cleaned(w: str) -> bool:
@@ -513,6 +693,8 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
             ("EBS Snapshots" in w,         snap_cleanup),
             ("EBS Volumes" in w,           ebs_cleanup),
             ("EC2 Instances" in w,         ec2_cleanup),
+            ("EIP" in w,                   eip_cleanup),
+            ("Lambda" in w,                lambda_cleanup),
             ("RDS Snapshots" in w,         rds_snap_cleanup),
             ("RDS Cluster Snapshots" in w, rds_snap_cleanup),
             ("VPC" in w,                   vpc_cleanup),
@@ -539,7 +721,81 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
                    "iam_cleanup": iam_cleanup, "ami_cleanup": ami_cleanup,
                    "snap_cleanup": snap_cleanup, "rds_snap_cleanup": rds_snap_cleanup,
                    "ec2_cleanup": ec2_cleanup, "ebs_cleanup": ebs_cleanup,
+                   "eip_cleanup": eip_cleanup, "lambda_cleanup": lambda_cleanup,
                    "vpc_cleanup": vpc_cleanup})
+
+
+# ── 삭제 전용 계정 처리 ────────────────────────────────────────────────────────
+
+def _delete_account(cred: dict) -> None:
+    """단일 계정의 잔여 리소스를 삭제한다. 스캔 없이 정리만 수행한다.
+    clean 커맨드의 2단계(삭제 단계)에서 호출된다."""
+    update_fn = cred.get("_update_progress")
+    set_current_account(cred["name"])
+    account_name = cred["name"]
+    log = ["", f"{'='*60}", f"  [{account_name}] 리소스 정리 시작"]
+
+    session = make_session(cred["access_key"], cred["secret_key"])
+
+    # 리전 목록 조회
+    try:
+        regions = [r["RegionName"] for r in session.client("ec2", region_name="us-east-1").describe_regions(
+            Filters=[{"Name": "opt-in-status", "Values": ["opted-in", "opt-in-not-required"]}]
+        )["Regions"]]
+    except ClientError as e:
+        log += [f"  [오류] 리전 목록 조회 실패: {e}", f"{'='*60}"]
+        flush_log(log)
+        record_result({"name": account_name, "status": "error",
+                       "lambda_cleanup": {}, "iam_cleanup": {}, "cf_cleanup": {},
+                       "ami_cleanup": {}, "snap_cleanup": {}, "rds_snap_cleanup": {},
+                       "ec2_cleanup": {}, "eip_cleanup": {}, "ebs_cleanup": {}, "vpc_cleanup": {}})
+        return
+
+    # 감사에서 발견된 리소스 타입만 삭제 — 없는 타입은 API 호출조차 하지 않는다
+    warnings = cred.get("_audit_warnings", [])
+    def _found(keyword: str) -> bool:
+        return any(keyword in w for w in warnings)
+
+    should_run = {
+        "lambda_cleanup":   _found("Lambda"),
+        "iam_cleanup":      _found("IAM"),
+        "cf_cleanup":       _found("CloudFront"),
+        "ami_cleanup":      _found("AMI"),
+        "snap_cleanup":     _found("EBS Snapshots"),
+        "rds_snap_cleanup": _found("RDS Snapshots") or _found("RDS Cluster"),
+        "ec2_cleanup":      _found("EC2 Instances"),
+        "eip_cleanup":      _found("EIP"),
+        "ebs_cleanup":      _found("EBS Volumes"),
+        "vpc_cleanup":      _found("VPC"),
+    }
+
+    # 실행할 작업만 필터링 (순서 유지: 의존 관계 반영)
+    ALL_OPS = [
+        ("lambda_cleanup",   lambda: _perform_lambda_cleanup(session, log, regions),      "Lambda 삭제 중"),
+        ("iam_cleanup",      lambda: _perform_iam_cleanup(session, log),                  "IAM 정리 중"),
+        ("cf_cleanup",       lambda: _perform_cloudfront_cleanup(session, log),           "CloudFront 정리 중"),
+        ("ami_cleanup",      lambda: _perform_ami_cleanup(session, log, regions),         "AMI 정리 중"),
+        ("snap_cleanup",     lambda: _perform_ebs_snapshot_cleanup(session, log, regions),"EBS 스냅샷 삭제 중"),
+        ("rds_snap_cleanup", lambda: _perform_rds_snapshot_cleanup(session, log, regions),"RDS 스냅샷 삭제 중"),
+        ("ec2_cleanup",      lambda: _perform_ec2_cleanup(session, log, regions),         "EC2 종료 중"),
+        ("eip_cleanup",      lambda: _perform_eip_cleanup(session, log, regions),         "EIP 해제 중"),
+        ("ebs_cleanup",      lambda: _perform_ebs_volume_cleanup(session, log, regions),  "EBS 볼륨 삭제 중"),
+        ("vpc_cleanup",      lambda: _perform_vpc_cleanup(session, log, regions),         "VPC 삭제 중"),
+    ]
+    active_ops = [(key, fn, label) for key, fn, label in ALL_OPS if should_run.get(key)]
+    total_ops  = len(active_ops)
+    cleanup_results = {key: {} for key, _, _ in ALL_OPS}  # 미실행 항목은 빈 dict
+
+    log.append(f"  실행할 정리 작업: {', '.join(label for _, _, label in active_ops)}")
+
+    for i, (key, op_fn, status_text) in enumerate(active_ops):
+        if update_fn:
+            update_fn(int(i / total_ops * 100), status_text)
+        cleanup_results[key] = op_fn()
+
+    log += [f"  [{account_name}] 정리 완료", f"{'='*60}"]
+    flush_log(log)
+    record_result({"name": account_name, "status": "cleaned", **cleanup_results})
 
 
 # ── 요약 출력 ─────────────────────────────────────────────────────────────────
@@ -562,8 +818,12 @@ def _print_audit_summary(total: int, delete_mode: bool = False) -> None:
         stats = [
             ("IAM 정리",      [("삭제 완료", _sum("iam_cleanup", "deleted")),
                                ("삭제 실패", _sum("iam_cleanup", "failed"))]),
+            ("Lambda 정리",   [("삭제 완료", _sum("lambda_cleanup", "deleted")),
+                               ("삭제 실패", _sum("lambda_cleanup", "failed"))]),
             ("EC2 인스턴스",  [("종료 완료", _sum("ec2_cleanup", "terminated")),
                                ("종료 실패", _sum("ec2_cleanup", "failed"))]),
+            ("EIP 정리",      [("해제 완료", _sum("eip_cleanup", "released")),
+                               ("해제 실패", _sum("eip_cleanup", "failed"))]),
             ("EBS 볼륨",      [("삭제 완료", _sum("ebs_cleanup", "deleted")),
                                ("삭제 실패", _sum("ebs_cleanup", "failed"))]),
             ("AMI 정리",      [("해지 완료", _sum("ami_cleanup", "deregistered")),
@@ -605,6 +865,58 @@ def _print_audit_summary(total: int, delete_mode: bool = False) -> None:
     print("\n".join(lines))
 
 
+def _print_delete_summary() -> None:
+    """삭제 단계 결과 요약을 출력한다."""
+    results = get_results()
+    def _sum(key, sub): return sum(len(r.get(key, {}).get(sub, [])) for r in results)
+
+    stats = [
+        ("Lambda 정리",   [("삭제 완료", _sum("lambda_cleanup",   "deleted")),
+                           ("삭제 실패", _sum("lambda_cleanup",   "failed"))]),
+        ("IAM 정리",      [("삭제 완료", _sum("iam_cleanup",      "deleted")),
+                           ("삭제 실패", _sum("iam_cleanup",      "failed"))]),
+        ("EC2 인스턴스",  [("종료 완료", _sum("ec2_cleanup",      "terminated")),
+                           ("종료 실패", _sum("ec2_cleanup",      "failed"))]),
+        ("EIP 정리",      [("해제 완료", _sum("eip_cleanup",      "released")),
+                           ("해제 실패", _sum("eip_cleanup",      "failed"))]),
+        ("EBS 볼륨",      [("삭제 완료", _sum("ebs_cleanup",      "deleted")),
+                           ("삭제 실패", _sum("ebs_cleanup",      "failed"))]),
+        ("AMI 정리",      [("해지 완료", _sum("ami_cleanup",      "deregistered")),
+                           ("해지 실패", _sum("ami_cleanup",      "failed"))]),
+        ("EBS 스냅샷",    [("삭제 완료", _sum("snap_cleanup",     "deleted")),
+                           ("삭제 실패", _sum("snap_cleanup",     "failed"))]),
+        ("RDS 스냅샷",    [("삭제 완료", _sum("rds_snap_cleanup", "deleted")),
+                           ("삭제 실패", _sum("rds_snap_cleanup", "failed"))]),
+        ("VPC 정리",      [("삭제 완료", _sum("vpc_cleanup",      "deleted")),
+                           ("삭제 실패", _sum("vpc_cleanup",      "failed"))]),
+        ("CloudFront",    [("삭제 완료",    _sum("cf_cleanup", "deleted")),
+                           ("비활성화 요청", _sum("cf_cleanup", "disabled")),
+                           ("실패",         _sum("cf_cleanup", "failed")),
+                           ("스킵",         _sum("cf_cleanup", "skipped"))]),
+    ]
+
+    lines = ["", "=" * 60, "  [삭제 결과 요약]", "=" * 60]
+    any_action = False
+    for section, items in stats:
+        if any(v for _, v in items):
+            any_action = True
+            lines += [f"  ─────────────────────────────────────", f"  {section} 현황"]
+            for label, val in items:
+                if val:
+                    lines.append(f"    · {label:<14} : {val}개")
+
+    cf_disabled = [r for r in results if r.get("cf_cleanup", {}).get("disabled")]
+    if cf_disabled:
+        lines += ["", "=" * 60, "  [CloudFront 재실행 필요 — 배포 비활성화만 완료]", "=" * 60]
+        for r in sorted(cf_disabled, key=account_sort_key):
+            lines.append(f"  {r['name']:<10}  배포 ID: {', '.join(r['cf_cleanup']['disabled'])}")
+
+    if not any_action:
+        lines.append("  삭제된 리소스 없음")
+    lines.append("=" * 60)
+    print("\n".join(lines))
+
+
 # ── click 커맨드 ───────────────────────────────────────────────────────────────
 
 @click.command()
@@ -636,30 +948,60 @@ def cmd(credentials_file, account_filter, output_fmt, delete, yes, dry_run):
     click.echo("\n모든 계정 검사 완료.")
 
 
-# clean 커맨드 — audit --delete 의 별칭, 설명만 다르게 노출
+# clean 커맨드 — 1단계 감사 → 결과 확인 → 2단계 삭제
 @click.command()
 @click.option("--credentials-file", default="accesskey.txt", show_default=True,
               help="자격증명 파일 경로")
 @click.option("--filter", "-f", "account_filter", default=None,
               help="처리할 계정 범위 (예: 1-5, 1,3,5)")
-@click.option("--output", "-o", "output_fmt",
-              type=click.Choice(["table", "json", "csv"]), default="table", show_default=True,
-              help="출력 포맷")
 @click.option("--yes", "-y", is_flag=True, help="삭제 확인 프롬프트 생략")
-@click.option("--dry-run", is_flag=True, help="실제 변경 없이 결과 미리 보기")
-def clean_cmd(credentials_file, account_filter, output_fmt, yes, dry_run):
-    """잔여 리소스 스캔 후 삭제."""
+@click.option("--dry-run", is_flag=True, help="실제 변경 없이 감사 결과만 출력")
+def clean_cmd(credentials_file, account_filter, yes, dry_run):
+    """잔여 리소스 감사 후 확인을 받아 삭제한다. (1단계: 감사 → 확인 → 2단계: 삭제)"""
     creds = filter_credentials(load_credentials(credentials_file), account_filter)
     if not creds:
         click.echo("처리할 계정 정보가 없습니다.")
         return
 
-    delete_mode = not dry_run
-    if delete_mode and not yes:
-        click.confirm("잔여 리소스를 삭제하시겠습니까?", abort=True)
-
-    click.echo(f"AWS 리소스 감사 + 삭제 시작 — 총 {len(creds)}개 계정\n")
+    # ── 1단계: 감사 ──────────────────────────────────────────────────────────
+    click.echo(f"\n[1단계] 잔여 리소스 감사 — 총 {len(creds)}개 계정\n")
     clear_results()
-    run_parallel(partial(_audit_account, delete_mode=delete_mode), creds)
-    _print_audit_summary(len(creds), delete_mode=delete_mode)
-    click.echo("\n모든 계정 검사 완료.")
+    run_parallel(partial(_audit_account, delete_mode=False), creds)
+    _print_audit_summary(len(creds), delete_mode=False)
+
+    # 잔여 리소스가 있는 계정만 추출 — warnings도 함께 보존해 2단계에서 선택적 삭제에 사용
+    audit_results = get_results()
+    dirty_map = {
+        r["name"]: r["warnings"]
+        for r in audit_results if r["status"] == "has_resources"
+    }
+    if not dirty_map:
+        click.echo("\n모든 계정이 깨끗합니다. 정리할 리소스가 없습니다.")
+        return
+
+    if dry_run:
+        click.echo("\n[dry-run] 실제 삭제는 수행하지 않습니다.")
+        return
+
+    # ── 삭제 확인 ────────────────────────────────────────────────────────────
+    # _audit_warnings: 감사에서 발견된 경고 목록을 삭제 단계에 전달 (필요한 작업만 실행하기 위해)
+    dirty_creds = [
+        {**c, "_audit_warnings": dirty_map[c["name"]]}
+        for c in creds if c["name"] in dirty_map
+    ]
+    if not yes:
+        try:
+            click.confirm(
+                f"\n위 리소스를 삭제하시겠습니까? ({len(dirty_creds)}개 계정)",
+                abort=True,
+            )
+        except click.exceptions.Abort:
+            click.echo("\n취소됐습니다.")
+            return
+
+    # ── 2단계: 삭제 ──────────────────────────────────────────────────────────
+    click.echo(f"\n[2단계] 리소스 삭제 — {len(dirty_creds)}개 계정\n")
+    clear_results()
+    run_parallel(_delete_account, dirty_creds)
+    _print_delete_summary()
+    click.echo("\n모든 계정 정리 완료.")
