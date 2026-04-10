@@ -18,6 +18,7 @@ import click
 from botocore.exceptions import BotoCoreError, ClientError
 
 from utils.constants import EXPECTED_IAM_USERS, PROTECTED_IAM_POLICIES
+from utils.iam_helpers import force_delete_iam_policy, force_delete_iam_role, force_delete_iam_user
 from utils.credentials import filter_credentials, load_credentials
 from utils.output import (
     account_sort_key, clear_results, flush_log, get_results,
@@ -124,113 +125,6 @@ def _kms_is_disabled_customer_key(client, key_id: str) -> bool:
         return False
 
 
-# ── 삭제 헬퍼 함수들 ──────────────────────────────────────────────────────────
-
-def _force_delete_iam_user(iam, username: str, log: list) -> None:
-    """IAM 사용자 삭제 전 종속 리소스를 모두 제거한 뒤 삭제한다."""
-    for key in iam.list_access_keys(UserName=username).get("AccessKeyMetadata", []):
-        iam.delete_access_key(UserName=username, AccessKeyId=key["AccessKeyId"])
-    try:
-        iam.delete_login_profile(UserName=username)
-    except iam.exceptions.NoSuchEntityException:
-        pass
-    for mfa in iam.list_mfa_devices(UserName=username).get("MFADevices", []):
-        iam.deactivate_mfa_device(UserName=username, SerialNumber=mfa["SerialNumber"])
-        try:
-            iam.delete_virtual_mfa_device(SerialNumber=mfa["SerialNumber"])
-        except ClientError:
-            pass
-    for cert in iam.list_signing_certificates(UserName=username).get("Certificates", []):
-        iam.delete_signing_certificate(UserName=username, CertificateId=cert["CertificateId"])
-    for key in iam.list_ssh_public_keys(UserName=username).get("SSHPublicKeys", []):
-        iam.delete_ssh_public_key(UserName=username, SSHPublicKeyId=key["SSHPublicKeyId"])
-    for group in iam.list_groups_for_user(UserName=username).get("Groups", []):
-        iam.remove_user_from_group(GroupName=group["GroupName"], UserName=username)
-    for policy in iam.list_attached_user_policies(UserName=username).get("AttachedPolicies", []):
-        iam.detach_user_policy(UserName=username, PolicyArn=policy["PolicyArn"])
-    for pname in iam.list_user_policies(UserName=username).get("PolicyNames", []):
-        iam.delete_user_policy(UserName=username, PolicyName=pname)
-    iam.delete_user(UserName=username)
-    log.append(f"  [IAM 정리] 사용자 삭제 완료: {username}")
-
-
-def _force_delete_iam_role(iam, role_name: str, log: list) -> None:
-    """IAM 역할 삭제 전 종속 리소스(인스턴스 프로파일·정책·인라인 정책)를 모두 제거한다."""
-    # 인스턴스 프로파일 분리
-    try:
-        profiles = iam.list_instance_profiles_for_role(RoleName=role_name).get("InstanceProfiles", [])
-    except ClientError:
-        profiles = []
-    for profile in profiles:
-        profile_name = profile["InstanceProfileName"]
-        try:
-            iam.remove_role_from_instance_profile(InstanceProfileName=profile_name, RoleName=role_name)
-        except ClientError:
-            pass
-        try:
-            iam.delete_instance_profile(InstanceProfileName=profile_name)
-        except ClientError:
-            pass
-    # 관리형 정책 분리
-    try:
-        attached = iam.list_attached_role_policies(RoleName=role_name).get("AttachedPolicies", [])
-    except ClientError:
-        attached = []
-    for policy in attached:
-        try:
-            iam.detach_role_policy(RoleName=role_name, PolicyArn=policy["PolicyArn"])
-        except ClientError:
-            pass
-    # 인라인 정책 삭제
-    try:
-        policy_names = iam.list_role_policies(RoleName=role_name).get("PolicyNames", [])
-    except ClientError:
-        policy_names = []
-    for pname in policy_names:
-        try:
-            iam.delete_role_policy(RoleName=role_name, PolicyName=pname)
-        except ClientError:
-            pass
-    iam.delete_role(RoleName=role_name)
-    log.append(f"  [IAM 정리] 역할 삭제 완료: {role_name}")
-
-
-def _force_delete_iam_policy(iam, policy_arn: str, policy_name: str, log: list) -> None:
-    """고객 관리형 IAM 정책을 모든 엔티티에서 분리한 뒤 삭제한다."""
-    # 모든 연결 엔티티에서 분리
-    try:
-        entities = iam.list_entities_for_policy(PolicyArn=policy_arn)
-    except ClientError:
-        entities = {}
-    for user in entities.get("PolicyUsers", []):
-        try:
-            iam.detach_user_policy(UserName=user["UserName"], PolicyArn=policy_arn)
-        except ClientError:
-            pass
-    for group in entities.get("PolicyGroups", []):
-        try:
-            iam.detach_group_policy(GroupName=group["GroupName"], PolicyArn=policy_arn)
-        except ClientError:
-            pass
-    for role in entities.get("PolicyRoles", []):
-        try:
-            iam.detach_role_policy(RoleName=role["RoleName"], PolicyArn=policy_arn)
-        except ClientError:
-            pass
-    # 비기본 버전 삭제
-    try:
-        versions = iam.list_policy_versions(PolicyArn=policy_arn).get("Versions", [])
-    except ClientError:
-        versions = []
-    for ver in versions:
-        if not ver["IsDefaultVersion"]:
-            try:
-                iam.delete_policy_version(PolicyArn=policy_arn, VersionId=ver["VersionId"])
-            except ClientError:
-                pass
-    iam.delete_policy(PolicyArn=policy_arn)
-    log.append(f"  [IAM 정리] 정책 삭제 완료: {policy_name}")
-
 
 def _perform_iam_cleanup(session, log: list) -> dict:
     iam = session.client("iam")
@@ -247,7 +141,7 @@ def _perform_iam_cleanup(session, log: list) -> dict:
         if username in EXPECTED_IAM_USERS or "AWSServiceRole" in user.get("Arn", ""):
             continue
         try:
-            _force_delete_iam_user(iam, username, log)
+            force_delete_iam_user(iam, username, log)
             result["deleted"].append(username)
         except ClientError as e:
             log.append(f"  [IAM 정리] 사용자 삭제 실패 ({username}): {e}")
@@ -265,7 +159,7 @@ def _perform_iam_cleanup(session, log: list) -> dict:
     for role in roles:
         role_name = role["RoleName"]
         try:
-            _force_delete_iam_role(iam, role_name, log)
+            force_delete_iam_role(iam, role_name, log)
             result["deleted"].append(role_name)
         except ClientError as e:
             log.append(f"  [IAM 정리] 역할 삭제 실패 ({role_name}): {e}")
@@ -284,7 +178,7 @@ def _perform_iam_cleanup(session, log: list) -> dict:
             log.append(f"  [IAM 정리] 보호된 정책 — 스킵: {policy_name}")
             continue
         try:
-            _force_delete_iam_policy(iam, policy_arn, policy_name, log)
+            force_delete_iam_policy(iam, policy_arn, policy_name, log)
             result["deleted"].append(policy_name)
         except ClientError as e:
             log.append(f"  [IAM 정리] 정책 삭제 실패 ({policy_name}): {e}")
