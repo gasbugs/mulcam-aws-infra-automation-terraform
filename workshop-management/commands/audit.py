@@ -15,6 +15,7 @@ from pathlib import Path
 import click
 from botocore.exceptions import BotoCoreError, ClientError
 
+from utils.constants import EXPECTED_IAM_USERS, PROTECTED_IAM_POLICIES
 from utils.credentials import filter_credentials, load_credentials
 from utils.output import account_sort_key, clear_results, flush_log, get_results, record_result, set_current_account
 from utils.parallel import run_parallel
@@ -79,8 +80,6 @@ RESOURCE_CHECKS = {
     "Backup Vaults":               ("backup",       "regional", "list_backup_vaults",                           "BackupVaultList"),
 }
 
-EXPECTED_IAM_USERS    = {"terraform-user-0", "terraform-user-1"}
-PROTECTED_IAM_POLICIES = {"TerraformWorkshop-Restricted-us-east-1"}
 
 
 # ── 단일 서비스 검사 ──────────────────────────────────────────────────────────
