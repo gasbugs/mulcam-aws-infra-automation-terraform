@@ -74,3 +74,6 @@ target/
 05_elb-asg-terraform/packer-for-javaspring/target/**
 # 단, 컴파일된 최종 jar 파일만 Git에 포함 (Packer 빌드에 필요)
 !05_elb-asg-terraform/packer-for-javaspring/target/demo-0.0.1-SNAPSHOT.jar
+
+# Git worktree 격리 작업 공간
+.worktrees/
