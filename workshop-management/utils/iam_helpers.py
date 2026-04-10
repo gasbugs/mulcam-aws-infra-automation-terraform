@@ -19,30 +19,36 @@ def force_delete_iam_user(iam, username: str, log: list) -> None:
     # 프로그래밍 방식 액세스에 사용하는 액세스 키 삭제
     for key in iam.list_access_keys(UserName=username).get("AccessKeyMetadata", []):
         iam.delete_access_key(UserName=username, AccessKeyId=key["AccessKeyId"])
+        log.append(f"  [삭제] 액세스 키: {key['AccessKeyId'][:10]}...")
 
     # 콘솔 로그인에 사용하는 패스워드(로그인 프로파일) 삭제
     try:
         iam.delete_login_profile(UserName=username)
+        log.append(f"  [삭제] 로그인 프로파일 삭제")
     except iam.exceptions.NoSuchEntityException:
         # 로그인 프로파일이 없는 경우 무시
         pass
 
     # MFA(다중 인증) 디바이스 비활성화 및 삭제
     for mfa in iam.list_mfa_devices(UserName=username).get("MFADevices", []):
-        iam.deactivate_mfa_device(UserName=username, SerialNumber=mfa["SerialNumber"])
+        serial = mfa["SerialNumber"]
+        iam.deactivate_mfa_device(UserName=username, SerialNumber=serial)
         try:
-            iam.delete_virtual_mfa_device(SerialNumber=mfa["SerialNumber"])
+            iam.delete_virtual_mfa_device(SerialNumber=serial)
         except ClientError:
             # 실제 MFA 기기(하드웨어)는 가상 삭제 불가이므로 오류 무시
             pass
+        log.append(f"  [삭제] MFA 디바이스: {serial}")
 
     # 코드 서명에 사용하는 서명 인증서 삭제
     for cert in iam.list_signing_certificates(UserName=username).get("Certificates", []):
         iam.delete_signing_certificate(UserName=username, CertificateId=cert["CertificateId"])
+        log.append(f"  [삭제] 서명 인증서: {cert['CertificateId'][:10]}...")
 
     # CodeCommit 등 SSH 접근에 사용하는 SSH 퍼블릭 키 삭제
     for key in iam.list_ssh_public_keys(UserName=username).get("SSHPublicKeys", []):
         iam.delete_ssh_public_key(UserName=username, SSHPublicKeyId=key["SSHPublicKeyId"])
+        log.append(f"  [삭제] SSH 퍼블릭 키: {key['SSHPublicKeyId'][:10]}...")
 
     # CodeCommit HTTPS 등 서비스별 자격증명(서비스 특화 패스워드) 삭제
     try:
@@ -54,20 +60,26 @@ def force_delete_iam_user(iam, username: str, log: list) -> None:
                 UserName=username,
                 ServiceSpecificCredentialId=cred["ServiceSpecificCredentialId"],
             )
+            log.append(f"  [삭제] 서비스 자격증명: {cred.get('ServiceName', cred['ServiceSpecificCredentialId'])}")
     except (iam.exceptions.NoSuchEntityException, ClientError):
         pass
 
     # 사용자가 속한 모든 IAM 그룹에서 제거
     for group in iam.list_groups_for_user(UserName=username).get("Groups", []):
         iam.remove_user_from_group(GroupName=group["GroupName"], UserName=username)
+        log.append(f"  [제거] 그룹 제거: {group['GroupName']}")
 
-    # 사용자에 연결된 관리형 정책 해제
-    for policy in iam.list_attached_user_policies(UserName=username).get("AttachedPolicies", []):
-        iam.detach_user_policy(UserName=username, PolicyArn=policy["PolicyArn"])
+    # 사용자에 연결된 관리형 정책 해제 — paginator로 페이지 초과 시에도 누락 없이 처리
+    paginator = iam.get_paginator("list_attached_user_policies")
+    for page in paginator.paginate(UserName=username):
+        for policy in page.get("AttachedPolicies", []):
+            iam.detach_user_policy(UserName=username, PolicyArn=policy["PolicyArn"])
+            log.append(f"  [해제] 관리형 정책 해제: {policy.get('PolicyName', policy['PolicyArn'])}")
 
     # 사용자에 직접 설정된 인라인 정책 삭제
     for pname in iam.list_user_policies(UserName=username).get("PolicyNames", []):
         iam.delete_user_policy(UserName=username, PolicyName=pname)
+        log.append(f"  [삭제] 인라인 정책 삭제: {pname}")
 
     # 모든 종속 리소스 제거 후 사용자 본체 삭제
     iam.delete_user(UserName=username)

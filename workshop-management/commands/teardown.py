@@ -21,7 +21,6 @@ from utils.session import get_account_id, make_session
 IAM_USER_NAME = "terraform-user-1"
 
 
-
 # ── 계정별 처리 ────────────────────────────────────────────────────────────────
 
 def _teardown_account(cred: dict) -> None:
