@@ -15,6 +15,7 @@ from pathlib import Path
 import click
 from botocore.exceptions import BotoCoreError, ClientError
 
+from commands.cleaners.misc import kms_is_disabled_customer_key
 from utils.constants import EXPECTED_IAM_USERS, PROTECTED_IAM_POLICIES
 from utils.credentials import filter_credentials, load_credentials
 from utils.output import account_sort_key, clear_results, flush_log, get_results, record_result, set_current_account
@@ -106,7 +107,7 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
 
         elif resource_name == "KMS Keys (Disabled CMK)":
             keys = client.list_keys().get(result_key, [])
-            disabled = [k for k in keys if _kms_is_disabled_customer_key(client, k["KeyId"])]
+            disabled = [k for k in keys if kms_is_disabled_customer_key(client, k["KeyId"])]
             if disabled:
                 return f"{resource_name} 리소스 {len(disabled)}개 발견 (리전: {region})"
 
@@ -260,14 +261,6 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
     except (ClientError, BotoCoreError):
         pass
     return None
-
-
-def _kms_is_disabled_customer_key(client, key_id: str) -> bool:
-    try:
-        meta = client.describe_key(KeyId=key_id).get("KeyMetadata", {})
-        return meta.get("KeyManager") == "CUSTOMER" and meta.get("KeyState") == "Disabled"
-    except ClientError:
-        return False
 
 
 # ── 스냅샷 저장/회전 ───────────────────────────────────────────────────────────

@@ -15,6 +15,11 @@ def force_delete_iam_user(iam, username: str, log: list) -> None:
 
     IAM 사용자를 바로 지우면 오류가 발생하므로 액세스 키·MFA·인증서·
     그룹·정책·서비스 자격증명 등을 먼저 하나씩 제거한 뒤 최종 삭제한다.
+
+    설계 의도: 단계별로 독립적인 try/except를 두지 않고, ClientError가 발생하면
+    호출자(teardown.py)로 예외를 전파한다. 워크샵 강의 종료 후 관리자 권한으로
+    실행하는 특성상 중간 단계 실패는 권한 문제 등 심각한 오류이므로 fail-fast가
+    적절하다. 호출자가 오류를 로그에 기록하고 다음 계정으로 진행한다.
     """
     # 프로그래밍 방식 액세스에 사용하는 액세스 키 삭제
     for key in iam.list_access_keys(UserName=username).get("AccessKeyMetadata", []):

@@ -194,7 +194,7 @@ def _delete_account(cred: dict) -> None:
         "eks_cleanup":             _found("EKS"),
         "asg_cleanup":             _found("AutoScalingGroups"),
         "elb_cleanup":             _found("ELB"),
-        "rds_cleanup":             _found("RDS") and not _found("RDS Snapshots"),
+        "rds_cleanup":             _found("RDS 리소스"),  # "RDS Snapshots 리소스"와 구분하기 위해 "RDS 리소스"로 매칭
         "elasticache_cleanup":     _found("ElastiCache"),
         "efs_cleanup":             _found("EFS"),
         "secretsmanager_cleanup":  _found("SecretManager"),

@@ -10,9 +10,10 @@ import time
 from botocore.exceptions import BotoCoreError, ClientError
 
 
-def _kms_is_disabled_customer_key(client, key_id: str) -> bool:
+def kms_is_disabled_customer_key(client, key_id: str) -> bool:
     """고객 관리형(CUSTOMER) KMS 키이면서 Disabled 상태인지 확인한다.
-    AWS 관리형 키는 삭제 대상에서 제외하기 위해 KeyManager를 함께 검사한다."""
+    AWS 관리형 키는 삭제 대상에서 제외하기 위해 KeyManager를 함께 검사한다.
+    audit.py와 misc.py 두 곳에서 사용하므로 공개 함수로 정의한다."""
     try:
         meta = client.describe_key(KeyId=key_id).get("KeyMetadata", {})
         return meta.get("KeyManager") == "CUSTOMER" and meta.get("KeyState") == "Disabled"
@@ -328,7 +329,7 @@ def perform_kms_cleanup(session, log: list, regions: list) -> dict:
             keys = kms.list_keys().get("Keys", [])
             for key in keys:
                 key_id = key["KeyId"]
-                if not _kms_is_disabled_customer_key(kms, key_id):
+                if not kms_is_disabled_customer_key(kms, key_id):
                     continue
                 try:
                     kms.schedule_key_deletion(KeyId=key_id, PendingWindowInDays=7)
