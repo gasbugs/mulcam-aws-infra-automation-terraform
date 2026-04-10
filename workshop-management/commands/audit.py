@@ -350,7 +350,8 @@ def _perform_iam_cleanup(session, log: list) -> dict:
     try:
         roles = [r for r in iam.list_roles().get("Roles", [])
                  if not r.get("Path", "").startswith("/aws-service-role/")
-                 and "AWSServiceRole" not in r.get("RoleName", "")]
+                 and "AWSServiceRole" not in r.get("RoleName", "")
+                 and not r.get("RoleName", "").startswith("AWSReservedSSO_")]
     except ClientError as e:
         log.append(f"  [IAM 정리] 역할 목록 조회 실패: {e}")
         roles = []
