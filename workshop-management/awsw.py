@@ -18,10 +18,11 @@
 #   creds     생성된 크레덴셜 CSV 목록 및 내용 출력
 #   pre       수업 전 준비 일괄 실행 (tag → admin → check)
 #   post      수업 후 정리 일괄 실행 (audit → clean → teardown)
+#   cf        CloudFront 배포 비활성화/삭제 (2단계 필요)
 # =============================================================================
 import click
 
-from commands import setup, teardown, audit, clean, cost, check, tag, admin, status, creds, workflow
+from commands import setup, teardown, audit, clean, cost, check, tag, admin, status, creds, workflow, cloudfront
 
 
 @click.group()
@@ -43,6 +44,7 @@ cli.add_command(status.cmd,      name="status")
 cli.add_command(creds.cmd,       name="creds")
 cli.add_command(workflow.pre,    name="pre")
 cli.add_command(workflow.post,   name="post")
+cli.add_command(cloudfront.cmd,  name="cf")
 
 
 if __name__ == "__main__":
