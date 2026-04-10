@@ -1002,6 +1002,17 @@ def _perform_s3_cleanup(session, log: list) -> dict:
 
 # ── 계정별 처리 ────────────────────────────────────────────────────────────────
 
+def _fetch_regions(cred: dict) -> list[str]:
+    """첫 번째 계정으로 활성화된 리전 목록을 한 번만 조회한다."""
+    session = make_session(cred["access_key"], cred["secret_key"])
+    try:
+        return [r["RegionName"] for r in session.client("ec2", region_name="us-east-1").describe_regions(
+            Filters=[{"Name": "opt-in-status", "Values": ["opted-in", "opt-in-not-required"]}]
+        )["Regions"]]
+    except ClientError as e:
+        raise RuntimeError(f"리전 목록 조회 실패: {e}")
+
+
 def _audit_account(cred: dict, delete_mode: bool = False) -> None:
     """단일 계정의 잔여 리소스를 병렬 스캔하고, delete_mode=True 이면 정리까지 수행한다."""
     update_fn = cred.get("_update_progress")  # 프로그레스바 갱신 콜백 (run_parallel이 주입)
@@ -1019,20 +1030,22 @@ def _audit_account(cred: dict, delete_mode: bool = False) -> None:
     except ClientError:
         pass
 
-    # 활성화된 리전 목록 조회
-    try:
-        regions = [r["RegionName"] for r in session.client("ec2", region_name="us-east-1").describe_regions(
-            Filters=[{"Name": "opt-in-status", "Values": ["opted-in", "opt-in-not-required"]}]
-        )["Regions"]]
-    except ClientError as e:
-        log += [f"  [오류] 리전 목록 조회 실패: {e}", f"{'='*60}"]
-        flush_log(log)
-        record_result({"name": account_name, "account_id": account_id, "status": "error",
-                       "warnings": [], "cf_cleanup": {}, "iam_cleanup": {}, "ami_cleanup": {},
-                       "snap_cleanup": {}, "rds_snap_cleanup": {}, "ec2_cleanup": {},
-                       "ebs_cleanup": {}, "eip_cleanup": {}, "lambda_cleanup": {}, "vpc_cleanup": {},
-                       "imagebuilder_cleanup": {}, "codecommit_cleanup": {}, "s3_cleanup": {}})
-        return
+    # 활성화된 리전 목록 — 호출 전에 미리 조회된 값이 있으면 재사용
+    regions = cred.get("_regions")
+    if not regions:
+        try:
+            regions = [r["RegionName"] for r in session.client("ec2", region_name="us-east-1").describe_regions(
+                Filters=[{"Name": "opt-in-status", "Values": ["opted-in", "opt-in-not-required"]}]
+            )["Regions"]]
+        except ClientError as e:
+            log += [f"  [오류] 리전 목록 조회 실패: {e}", f"{'='*60}"]
+            flush_log(log)
+            record_result({"name": account_name, "account_id": account_id, "status": "error",
+                           "warnings": [], "cf_cleanup": {}, "iam_cleanup": {}, "ami_cleanup": {},
+                           "snap_cleanup": {}, "rds_snap_cleanup": {}, "ec2_cleanup": {},
+                           "ebs_cleanup": {}, "eip_cleanup": {}, "lambda_cleanup": {}, "vpc_cleanup": {},
+                           "imagebuilder_cleanup": {}, "codecommit_cleanup": {}, "s3_cleanup": {}})
+            return
 
     # 서비스별 병렬 검사
     # max_workers=10: 계정 11개 × 10 내부 스레드 = ~110개로 GIL 경쟁 완화
@@ -1157,21 +1170,23 @@ def _delete_account(cred: dict) -> None:
 
     session = make_session(cred["access_key"], cred["secret_key"])
 
-    # 리전 목록 조회
-    try:
-        regions = [r["RegionName"] for r in session.client("ec2", region_name="us-east-1").describe_regions(
-            Filters=[{"Name": "opt-in-status", "Values": ["opted-in", "opt-in-not-required"]}]
-        )["Regions"]]
-    except ClientError as e:
-        log += [f"  [오류] 리전 목록 조회 실패: {e}", f"{'='*60}"]
-        flush_log(log)
-        record_result({"name": account_name, "status": "error",
-                       "lambda_cleanup": {}, "apigateway_cleanup": {}, "cloudwatch_cleanup": {},
-                       "iam_cleanup": {}, "cf_cleanup": {},
-                       "ami_cleanup": {}, "snap_cleanup": {}, "rds_snap_cleanup": {},
-                       "ec2_cleanup": {}, "eip_cleanup": {}, "ebs_cleanup": {}, "vpc_cleanup": {},
-                       "imagebuilder_cleanup": {}, "codecommit_cleanup": {}, "s3_cleanup": {}})
-        return
+    # 활성화된 리전 목록 — 호출 전에 미리 조회된 값이 있으면 재사용
+    regions = cred.get("_regions")
+    if not regions:
+        try:
+            regions = [r["RegionName"] for r in session.client("ec2", region_name="us-east-1").describe_regions(
+                Filters=[{"Name": "opt-in-status", "Values": ["opted-in", "opt-in-not-required"]}]
+            )["Regions"]]
+        except ClientError as e:
+            log += [f"  [오류] 리전 목록 조회 실패: {e}", f"{'='*60}"]
+            flush_log(log)
+            record_result({"name": account_name, "status": "error",
+                           "lambda_cleanup": {}, "apigateway_cleanup": {}, "cloudwatch_cleanup": {},
+                           "iam_cleanup": {}, "cf_cleanup": {},
+                           "ami_cleanup": {}, "snap_cleanup": {}, "rds_snap_cleanup": {},
+                           "ec2_cleanup": {}, "eip_cleanup": {}, "ebs_cleanup": {}, "vpc_cleanup": {},
+                           "imagebuilder_cleanup": {}, "codecommit_cleanup": {}, "s3_cleanup": {}})
+            return
 
     # 감사에서 발견된 리소스 타입만 삭제 — 없는 타입은 API 호출조차 하지 않는다
     warnings = cred.get("_audit_warnings", [])
@@ -1392,8 +1407,10 @@ def cmd(credentials_file, account_filter, output_fmt, delete, yes, dry_run):
         click.confirm("잔여 리소스를 삭제하시겠습니까?", abort=True)
 
     click.echo(f"AWS 리소스 감사 시작 ({'감사 + 삭제' if delete_mode else '감사만'}) — 총 {len(creds)}개 계정\n")
+    regions = _fetch_regions(creds[0])
+    enriched_creds = [{**c, "_regions": regions} for c in creds]
     clear_results()
-    run_parallel(partial(_audit_account, delete_mode=delete_mode), creds)
+    run_parallel(partial(_audit_account, delete_mode=delete_mode), enriched_creds)
     _print_audit_summary(len(creds), delete_mode=delete_mode)
     click.echo("\n모든 계정 검사 완료.")
 
@@ -1415,8 +1432,10 @@ def clean_cmd(credentials_file, account_filter, yes, dry_run):
 
     # ── 1단계: 감사 ──────────────────────────────────────────────────────────
     click.echo(f"\n[1단계] 잔여 리소스 감사 — 총 {len(creds)}개 계정\n")
+    regions = _fetch_regions(creds[0])
+    enriched_creds = [{**c, "_regions": regions} for c in creds]
     clear_results()
-    run_parallel(partial(_audit_account, delete_mode=False), creds)
+    run_parallel(partial(_audit_account, delete_mode=False), enriched_creds)
     _print_audit_summary(len(creds), delete_mode=False)
 
     # 잔여 리소스가 있는 계정만 추출 — warnings도 함께 보존해 2단계에서 선택적 삭제에 사용
@@ -1435,8 +1454,9 @@ def clean_cmd(credentials_file, account_filter, yes, dry_run):
 
     # ── 삭제 확인 ────────────────────────────────────────────────────────────
     # _audit_warnings: 감사에서 발견된 경고 목록을 삭제 단계에 전달 (필요한 작업만 실행하기 위해)
+    # _regions: 1단계에서 조회한 리전 목록 재사용
     dirty_creds = [
-        {**c, "_audit_warnings": dirty_map[c["name"]]}
+        {**c, "_audit_warnings": dirty_map[c["name"]], "_regions": regions}
         for c in creds if c["name"] in dirty_map
     ]
     if not yes:
