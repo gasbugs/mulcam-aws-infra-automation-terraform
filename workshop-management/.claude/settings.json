@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // \"\"' | { read -r f; echo \"$f\" | grep -qE \"^/Users/gasbugs/mulcam-aws-infra-automation-terraform/workshop-management/.+\\.py$\" && /Users/gasbugs/mulcam-aws-infra-automation-terraform/workshop-management/.claude/scripts/deploy.sh; } 2>/dev/null || true",
+            "statusMessage": "awsw 배포 중..."
+          }
+        ]
+      }
+    ]
+  }
+}
