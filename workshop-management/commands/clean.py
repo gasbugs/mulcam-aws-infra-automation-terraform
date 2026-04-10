@@ -17,13 +17,13 @@ from pathlib import Path
 import click
 from botocore.exceptions import BotoCoreError, ClientError
 
+from utils.constants import EXPECTED_IAM_USERS, PROTECTED_IAM_POLICIES
 from utils.credentials import filter_credentials, load_credentials
 from utils.output import (
     account_sort_key, clear_results, flush_log, get_results,
     record_result, set_current_account,
 )
 from utils.parallel import run_parallel
-from utils.constants import EXPECTED_IAM_USERS, PROTECTED_IAM_POLICIES
 from utils.session import make_session
 
 

@@ -81,7 +81,6 @@ RESOURCE_CHECKS = {
 }
 
 
-
 # ── 단일 서비스 검사 ──────────────────────────────────────────────────────────
 
 def _check_single_service(session, resource_name: str, config: tuple, region: str) -> str | None:
@@ -269,7 +268,6 @@ def _kms_is_disabled_customer_key(client, key_id: str) -> bool:
         return meta.get("KeyManager") == "CUSTOMER" and meta.get("KeyState") == "Disabled"
     except ClientError:
         return False
-
 
 
 # ── 스냅샷 저장/회전 ───────────────────────────────────────────────────────────
