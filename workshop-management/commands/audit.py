@@ -9,10 +9,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
-import os
-import time
-from datetime import date, datetime, timedelta
-from functools import partial
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -464,10 +461,7 @@ def _print_audit_summary(total: int) -> None:
               help="자격증명 파일 경로")
 @click.option("--filter", "-f", "account_filter", default=None,
               help="처리할 계정 범위 (예: 1-5, 1,3,5)")
-@click.option("--output", "-o", "output_fmt",
-              type=click.Choice(["table", "json", "csv"]), default="table", show_default=True,
-              help="출력 포맷")
-def cmd(credentials_file, account_filter, output_fmt):
+def cmd(credentials_file, account_filter):
     """잔여 리소스 스캔 및 스냅샷 저장. 삭제는 awsw clean 을 사용하세요."""
     creds = filter_credentials(load_credentials(credentials_file), account_filter)
     if not creds:
