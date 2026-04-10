@@ -47,8 +47,8 @@ AKIA**********AMPLE	je7Mt***************************AMPLEKEY
 |--------|------|
 | `awsw setup` | 수강생 IAM 유저(`terraform-user-1`) 생성 + 정책 연결 + CSV 출력 |
 | `awsw teardown` | 수강생 IAM 유저 완전 삭제 + 크레덴셜 CSV 제거 |
-| `awsw audit` | 잔여 리소스 스캔 (읽기 전용, 27개 서비스) |
-| `awsw clean` | 잔여 리소스 스캔 후 삭제 |
+| `awsw audit` | 잔여 리소스 스캔 후 스냅샷 저장 (47개 서비스) |
+| `awsw clean` | 스냅샷 기반 잔여 리소스 삭제 + 이력 저장 |
 | `awsw cost` | 전일(또는 지정일) 비용 리포트 |
 | `awsw check` | CloudFront / ALB 서비스 한도 점검 |
 | `awsw tag` | Cost Allocation 태그 활성화 |
@@ -74,26 +74,25 @@ awsw setup     # 수강생 계정 생성 → workshop-credentials-*.csv 출력
 
 # ── 수업 중 ───────────────────────────────────────────────
 awsw cost      # 비용 발생 여부 확인
-awsw audit     # 잔여 리소스 확인
+awsw audit     # 잔여 리소스 스캔 + 스냅샷 저장
 
 # ── 수업 종료 후 ───────────────────────────────────────────
-awsw clean     # 잔여 리소스 정리
+awsw audit     # 최신 상태로 스냅샷 갱신
+awsw clean     # 스냅샷 기반 잔여 리소스 삭제
 awsw teardown  # 수강생 계정 삭제
-# 위 둘을 한 번에: awsw post
+# 위 셋(audit → clean → teardown)을 한 번에: awsw post
 ```
 
 ---
 
 ## 공통 플래그
 
-| 플래그 | 단축 | 설명 |
-|--------|------|------|
-| `--credentials-file PATH` | | accesskey.txt 경로 (기본값: `./accesskey.txt`) |
-| `--filter RANGE` | `-f` | 특정 계정만 처리 (예: `1-5`, `1,3,5`) |
-| `--output [table\|json\|csv]` | `-o` | 출력 포맷 (기본값: `table`) |
-| `--dry-run` | | 실제 변경 없이 결과 미리 보기 |
-| `--yes` | `-y` | 삭제 작업의 확인 프롬프트 생략 |
-| `--date YYYY-MM-DD` | | `awsw cost`에서 조회 날짜 지정 (기본값: 전일) |
+| 플래그 | 단축 | 해당 커맨드 | 설명 |
+|--------|------|------------|------|
+| `--credentials-file PATH` | | 전체 | accesskey.txt 경로 (기본값: `./accesskey.txt`) |
+| `--filter RANGE` | `-f` | 전체 | 특정 계정만 처리 (예: `1-5`, `1,3,5`) |
+| `--yes` | `-y` | `clean`, `teardown` | 삭제 작업의 확인 프롬프트 생략 |
+| `--date YYYY-MM-DD` | | `cost` | 조회 날짜 지정 (기본값: 전일) |
 
 ---
 
@@ -128,9 +127,9 @@ awsw teardown -y           # 확인 프롬프트 생략
 
 ---
 
-### `awsw audit` / `awsw clean` — 잔여 리소스 감사
+### `awsw audit` — 잔여 리소스 스캔 + 스냅샷 저장
 
-수업 후 삭제되지 않은 리소스를 27개 서비스에 걸쳐 전 리전 스캔합니다.
+수업 후 삭제되지 않은 리소스를 47개 서비스에 걸쳐 전 리전 스캔하고, 결과를 `snapshots/audit_snapshot.json`에 저장합니다.
 비용이 발생할 수 있는 리소스는 `[비용주의]`로 표시됩니다.
 
 **감사 대상:**
@@ -138,17 +137,43 @@ awsw teardown -y           # 확인 프롬프트 생략
 | 구분 | 서비스 |
 |------|--------|
 | 글로벌 | IAM Users, CloudFront, WAFv2 (Global), Route53 |
-| 리전별 | EC2, VPC, AMI, EBS, EIP, ASG, KMS, ELB v1/v2, EKS, Lambda, Secrets Manager, RDS, ECS, ECR, CodeBuild, WAFv2 (Regional) |
+| 리전별 | EC2, VPC, AMI, EBS Snapshots/Volumes, EIP, ASG, ELB v1/v2, EKS, ECS, Lambda, API Gateway, RDS 인스턴스/클러스터/스냅샷, ElastiCache, EFS, DynamoDB, S3, KMS, CodePipeline, CodeBuild, CodeCommit, Secrets Manager, CloudWatch Logs/Alarms, Image Builder, ACM, SNS, SQS, Backup Vaults, WAFv2 (Regional), Key Pairs |
 
 ```bash
-awsw audit                 # 읽기 전용 스캔
-awsw clean                 # 스캔 후 삭제
-awsw clean --dry-run       # 삭제 없이 결과 미리 보기
-awsw clean -y              # 확인 프롬프트 생략
+awsw audit                 # 전체 계정 스캔 + 스냅샷 저장
+awsw audit -f 1-5          # 1~5번 계정만 스캔
 ```
 
+**스냅샷 파일 관리:**
+- 스캔 결과는 `snapshots/audit_snapshot.json`에 저장됩니다.
+- `awsw audit`을 재실행하면 기존 스냅샷은 `audit_snapshot_YYYYMMDD_HHMMSS.json` 형태로 보관되며, 최대 3개까지만 유지됩니다.
+
+---
+
+### `awsw clean` — 스냅샷 기반 잔여 리소스 삭제
+
+`awsw audit`이 저장한 스냅샷을 읽어 잔여 리소스가 있는 계정만 선택적으로 삭제합니다.
+삭제 완료 후 결과는 `snapshots/clean_history.json`에 누적 기록되고, 스냅샷 파일은 삭제됩니다.
+
+> **반드시 `awsw audit`을 먼저 실행**해야 합니다. 스냅샷이 없으면 오류 메시지와 함께 종료됩니다.
+
+```bash
+awsw audit                 # 1단계: 스캔 + 스냅샷 저장
+awsw clean                 # 2단계: 스냅샷 기반 삭제 (확인 프롬프트 있음)
+awsw clean -y              # 확인 프롬프트 생략하고 즉시 삭제
+awsw clean -f 1-5          # 스냅샷 중 1~5번 계정만 삭제
+```
+
+**생성되는 파일:**
+
+| 파일 | 설명 |
+|------|------|
+| `snapshots/audit_snapshot.json` | 최신 감사 결과 (clean 실행 후 자동 삭제) |
+| `snapshots/audit_snapshot_YYYYMMDD_HHMMSS.json` | 이전 감사 이력 (최대 3개 보관) |
+| `snapshots/clean_history.json` | 삭제 실행 이력 (누적 기록) |
+
 > CloudFront는 활성화된 배포를 즉시 삭제할 수 없습니다.
-> `awsw clean` 실행 시 비활성화 요청만 하며, Deployed 상태가 된 후 재실행하면 삭제됩니다.
+> `awsw clean` 실행 시 비활성화 요청만 하며, Deployed 상태가 된 후 `awsw audit` → `awsw clean`을 재실행하면 삭제됩니다.
 
 ---
 
