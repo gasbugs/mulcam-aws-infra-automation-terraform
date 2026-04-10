@@ -33,8 +33,12 @@ for dir in commands utils; do
   done
 done
 
+# cleaners/ 서브패키지 동기화
+mkdir -p "$SITE/commands/cleaners"
+cp "$SRC/commands/cleaners/"*.py "$SITE/commands/cleaners/"
+
 echo "동기화 완료"
 
 # 설치 확인
-python3 -c "import commands.audit; print('검증 완료: commands.audit 로드 성공')"
+python3 -c "from commands import clean, audit; from commands.cleaners import iam, compute, network, storage, database, misc; print('검증 완료: 전체 모듈 로드 성공')"
 ```
