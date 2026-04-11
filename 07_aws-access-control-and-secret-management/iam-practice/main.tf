@@ -1,6 +1,7 @@
 #####################################################################
 # 1)
-# S3 읽기/쓰기 정책 생성 #IAM #S3 #ReadWritePolicy
+
+# S3 읽기/쓰기 정책 — 객체 업로드(PutObject)와 다운로드(GetObject)를 허용하는 커스텀 정책
 resource "aws_iam_policy" "s3_rw_policy" {
   name        = "S3ReadWritePolicy"                                                 # 정책 이름
   description = "Policy for project_member to access S3 bucket project-data-bucket" # 정책 설명
@@ -19,18 +20,18 @@ resource "aws_iam_policy" "s3_rw_policy" {
   })
 }
 
-
-# IAM 유저 생성
+# 프로젝트 멤버 사용자 — S3 정책을 직접 연결받는 개발팀 멤버 계정
 resource "aws_iam_user" "project_member" {
   name = "project_member"
 }
 
+# 사용자에게 직접 정책 연결 — 역할 없이 사용자에게 바로 권한을 부여하는 방식
 resource "aws_iam_user_policy_attachment" "project_member_policy_attach" {
   user       = aws_iam_user.project_member.name
   policy_arn = aws_iam_policy.s3_rw_policy.arn
 }
 
-# 생성한 유저에 대한 Access Key 생성 (프로그래밍적 접근을 위해 사용)
+# 프로그래밍 방식 접근 키 생성 — CLI 또는 SDK에서 사용할 자격증명
 resource "aws_iam_access_key" "example_user_key" {
   user = aws_iam_user.project_member.name
 }
@@ -38,11 +39,13 @@ resource "aws_iam_access_key" "example_user_key" {
 
 #####################################################################
 # 2)
+
+# 운영 사용자 — AssumeRole을 통해 EC2 조회 권한을 획득할 운영팀 계정
 resource "aws_iam_user" "operating_user" {
   name = "operating_user"
 }
 
-# EC2 상태 조회를 위한 IAM 역할 생성 #IAM #Role #EC2
+# EC2 상태 조회 역할 — 운영 사용자가 위임받아 EC2 인스턴스 목록을 볼 수 있는 역할
 resource "aws_iam_role" "dev_ec2_status_viewer" {
   name = "DevEC2StatusViewer" # 역할 이름
 
@@ -52,7 +55,7 @@ resource "aws_iam_role" "dev_ec2_status_viewer" {
       {
         "Effect" : "Allow", # 역할 위임 허용
         "Principal" : {
-          "AWS" : "${aws_iam_user.operating_user.arn}" # 역할을 사용할 계정 ID (운영 계정)
+          "AWS" : "${aws_iam_user.operating_user.arn}" # 역할을 위임받을 운영 사용자 ARN
         },
         "Action" : "sts:AssumeRole" # sts:AssumeRole 액션 허용
       }
@@ -60,8 +63,7 @@ resource "aws_iam_role" "dev_ec2_status_viewer" {
   })
 }
 
-
-# EC2 인스턴스 상태 조회 권한 정책 생성 #IAM #Policy #EC2
+# EC2 상태 조회 정책 — DescribeInstances 권한만 허용하는 최소 권한 정책
 resource "aws_iam_policy" "ec2_status_view_policy" {
   name        = "EC2DescribeInstancesPolicy"         # 정책 이름
   description = "Allows viewing EC2 instance status" # 정책 설명

@@ -1,23 +1,33 @@
-# 프라이더 정보 
+# 입력 변수 정의 — 코드를 재사용하기 위해 외부에서 값을 받는 설정
+
+# AWS 연결 정보
 variable "aws_region" {
-  description = "AWS region for all resources"
+  description = "AWS 리소스를 생성할 리전 (예: us-east-1)"
   type        = string
+  default     = "us-east-1"
 }
 
 variable "aws_profile" {
-  description = "AWS profile for all resources"
+  description = "AWS CLI에 설정된 자격증명 프로파일 이름"
   type        = string
+  default     = "my-profile"
 }
 
-# 유저 정보 
+variable "environment" {
+  description = "배포 환경 구분자 (예: dev, staging, prod)"
+  type        = string
+  default     = "dev"
+}
+
+# IAM 유저 정보
 variable "user_name" {
-  description = "The name of the IAM user"
+  description = "생성할 IAM 사용자의 이름"
   type        = string
   default     = "example_user"
 }
 
 variable "s3_policy_file" {
-  description = "The path to the JSON file containing the S3 read-only policy"
+  description = "S3 읽기 전용 권한을 정의한 JSON 파일 경로"
   type        = string
   default     = "s3-readonly-policy.json"
 }

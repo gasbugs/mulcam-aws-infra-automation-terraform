@@ -1,67 +1,66 @@
+# 입력 변수 정의 — IAM Identity Center(SSO) 설정에 필요한 외부 값
+
+# AWS 리소스를 배포할 리전을 지정하는 변수
 variable "aws_region" {
-  description = "AWS region for all resources"
+  description = "AWS 리소스를 생성할 리전 (예: us-east-1)"
   type        = string
+  default     = "us-east-1"
 }
 
+# AWS CLI 자격증명 프로파일을 지정하는 변수
 variable "aws_profile" {
-  description = "AWS profile for all resources"
+  description = "AWS CLI에 설정된 자격증명 프로파일 이름"
   type        = string
+  default     = "my-profile"
 }
 
-
+# SSO 그룹 이름을 지정하는 변수
 variable "group_name" {
-  description = "팀 이름"
+  description = "IAM Identity Center에 생성할 그룹 이름 (예: 팀 이름)"
   type        = string
 }
 
+# SSO 사용자의 표시 이름을 지정하는 변수
 variable "user_display_name" {
-  description = "유저 이름"
+  description = "SSO 사용자의 표시 이름 (로그인 화면에 보이는 이름)"
   type        = string
 }
 
+# SSO 사용자의 이름(First name)을 지정하는 변수
 variable "user_given_name" {
-  description = "Firt name"
+  description = "SSO 사용자의 이름 (First name)"
   type        = string
 }
 
+# SSO 사용자의 성(Last name)을 지정하는 변수
 variable "user_family_name" {
-  description = "Last name"
+  description = "SSO 사용자의 성 (Last name)"
   type        = string
 }
 
+# 권한 집합을 할당할 주체(대상) 유형을 지정하는 변수
 variable "principal_type" {
-  description = "The type of principal (USER or GROUP)"
+  description = "권한 집합을 부여할 대상 유형 (USER: 개인 사용자, GROUP: 그룹)"
   type        = string
   default     = "USER"
 }
 
-
-# 프로파일에 추가할 이메일 정보, 여기로 계정 정보가 전달됨
+# SSO 로그인 초대 이메일을 받을 주소를 지정하는 변수
 variable "user_email" {
-  description = "프로파일에 추가할 이메일 정보, 여기로 계정 정보가 전달됨"
+  description = "SSO 사용자의 이메일 주소 — 이 주소로 로그인 초대 메일이 전송됨"
   type        = string
 }
 
-
-data "aws_caller_identity" "current" {}
-/*
-variable "aws_account_id" {
-  description = "The AWS account ID where the permission set will be assigned"
-  type        = string
-  default     = data.aws_caller_identity.current.account_id
-}
-*/
-
-# AWS CLI를 사용해 SSO 인스턴스의 ARN을 가져옴
-# aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text
+# AWS IAM Identity Center 인스턴스 ARN을 지정하는 변수
+# 조회 방법: aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text
 variable "sso_instance_arn" {
-  description = "AWS CLI를 사용해 SSO 인스턴스의 ARN을 가져옴"
+  description = "AWS IAM Identity Center 인스턴스 ARN (aws sso-admin list-instances로 조회)"
   type        = string
 }
 
-#AWS CLI를 사용해 Identity Store ID를 가져옴
-# aws sso-admin list-instances --query 'Instances[0].IdentityStoreId' --output text
+# Identity Store ID를 지정하는 변수
+# 조회 방법: aws sso-admin list-instances --query 'Instances[0].IdentityStoreId' --output text
 variable "identity_store_id" {
-  description = "AWS CLI를 사용해 Identity Store ID를 가져옴"
+  description = "Identity Store ID (aws sso-admin list-instances로 조회)"
   type        = string
 }

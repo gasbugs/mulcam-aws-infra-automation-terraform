@@ -1,10 +1,13 @@
-# AWS Identity Store에서 그룹 생성
+# 현재 AWS 계정 정보 조회 — 계정 ID를 동적으로 참조하기 위해 사용
+data "aws_caller_identity" "current" {}
+
+# Identity Store 그룹 생성 — SSO 사용자를 묶어서 권한을 일괄 관리하는 그룹
 resource "aws_identitystore_group" "sso_group" {
   identity_store_id = var.identity_store_id # AWS Identity Store의 고유 식별자
   display_name      = var.group_name        # 그룹의 표시 이름 (사용자에게 표시될 이름)
 }
 
-# AWS Identity Store에서 유저 생성
+# Identity Store 사용자 생성 — SSO 로그인이 가능한 중앙 관리 사용자 계정
 resource "aws_identitystore_user" "sso_user" {
   identity_store_id = var.identity_store_id # AWS Identity Store의 고유 식별자
   user_name         = var.user_display_name # 유저의 고유 이름 (로그인에 사용)
@@ -21,14 +24,14 @@ resource "aws_identitystore_user" "sso_user" {
   }
 }
 
-# 유저를 그룹에 추가 (옵션)
+# 그룹 멤버십 설정 — 사용자를 그룹에 추가하여 그룹 권한을 부여
 resource "aws_identitystore_group_membership" "sso_group_membership" {
   identity_store_id = var.identity_store_id                      # AWS Identity Store의 고유 식별자
   group_id          = aws_identitystore_group.sso_group.group_id # 유저를 추가할 그룹의 ID
   member_id         = aws_identitystore_user.sso_user.user_id    # 그룹에 추가할 유저의 ID
 }
 
-# AWS SSO Permission Set 생성
+# SSO 권한 집합(Permission Set) 생성 — 계정에 부여할 권한 묶음을 정의 (세션 지속 시간 포함)
 resource "aws_ssoadmin_permission_set" "sso_permission_set" {
   name             = "ReadOnlyAccess"                          # Permission Set의 이름
   description      = "SSO Permission Set for Read-Only Access" # Permission Set의 설명
@@ -41,7 +44,7 @@ resource "aws_ssoadmin_permission_set" "sso_permission_set" {
   }
 }
 
-# 특정 AWS 계정에 Permission Set 할당
+# 계정에 권한 집합 할당 — 특정 그룹이 특정 AWS 계정에 접근할 수 있도록 허용
 resource "aws_ssoadmin_account_assignment" "account_assignment" {
   instance_arn       = var.sso_instance_arn                               # AWS SSO 인스턴스의 ARN
   permission_set_arn = aws_ssoadmin_permission_set.sso_permission_set.arn # 할당할 Permission Set의 ARN
