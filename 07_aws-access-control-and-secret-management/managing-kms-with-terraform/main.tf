@@ -34,7 +34,10 @@ resource "aws_kms_key" "s3_encryption_key" {
         Sid : "Enable IAM User Permissions",
         Effect : "Allow",
         Principal : {
-          # 루트 계정에 KMS 키 전체 권한 부여 — IAM 정책으로 세부 접근 제어 가능
+          # :root 는 루트 사용자(root user)가 아니라 "이 AWS 계정 전체에 IAM 제어권을 위임"하는 의미
+          # 이 구문이 없으면 IAM 정책이 완전히 무시되어 키 정책에 명시된 사용자만 KMS에 접근 가능
+          # 특정 사용자(user/user0 등)를 하드코딩하면 해당 계정이 없는 환경에서 키 생성 자체가 실패하므로
+          # :root 로 IAM 위임을 활성화한 뒤, 아래 두 번째 Statement에서 실제 최소 권한을 적용하는 것이 AWS 공식 권장 패턴
           "AWS" : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
         },
         Action : "kms:*",
