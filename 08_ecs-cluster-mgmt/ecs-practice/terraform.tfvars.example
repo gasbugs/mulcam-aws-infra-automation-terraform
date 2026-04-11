@@ -1,10 +1,11 @@
 aws_region        = "us-east-1"
-project_name      = "ecs-cluster-mgmt"
-container_name    = "web"
+project_name      = "ecs-practice"
+container_name    = "nginx-container"
 container_image   = "public.ecr.aws/nginx/nginx:stable-alpine"
 container_port    = 80
-health_check_path = "/"
 desired_count     = 1
+ec2_instance_type = "t3.micro"
+health_check_path = "/"
 
 # Optional override:
 # task_cpu    = "256"

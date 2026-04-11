@@ -1,0 +1,9 @@
+aws_region                = "us-east-1"
+project_name              = "ecr-cache-lab"
+repository_name           = "my-ecr-repo"
+pull_through_cache_prefix = "docker-hub"
+allowed_ssh_cidr_blocks   = ["0.0.0.0/0"]
+
+# Required for Docker Hub pull-through cache creation in this environment.
+docker_hub_username     = "REPLACE_WITH_DOCKER_HUB_USERNAME"
+docker_hub_access_token = "REPLACE_WITH_DOCKER_HUB_PAT"

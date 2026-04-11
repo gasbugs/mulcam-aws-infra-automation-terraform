@@ -1,70 +1,160 @@
-# Create an ECR Repository
-resource "aws_ecr_repository" "my_ecr_repo" {
-  name                 = "my-ecr-repo"
-  image_tag_mutability = "MUTABLE" # 태그(버전)명 변경 
-
-  image_scanning_configuration {
-    scan_on_push = true # 이미지가 업로드되었을 때 스캔 수행
-  }
-
-  tags = {
-    Name = "MyECRRepository"
-  }
-}
-
 data "aws_caller_identity" "current" {}
 
-# Set up a Pull-Through Cache Rule for Docker Hub
-resource "aws_ecr_pull_through_cache_rule" "docker_hub" {
-  ecr_repository_prefix = "docker.io"
-  upstream_registry_url = "registry-1.docker.io"
-  credential_arn        = aws_secretsmanager_secret_version.docker_hub_credentials_version.arn
-  #credential_arn        = "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:ecr-pullthroughcache/docker-hub-cred"
+data "aws_ssm_parameter" "al2023_ami" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
-# AWS Secrets Manager에 비밀 생성
+data "aws_subnets" "default" {
+  filter {
+    name   = "default-for-az"
+    values = ["true"]
+  }
+}
+
+data "aws_vpc" "default" {
+  default = true
+}
+
+resource "aws_ecr_repository" "main" {
+  name                 = var.repository_name
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
 resource "aws_secretsmanager_secret" "docker_hub" {
-  name = "ecr-pullthroughcache/docker-hub-cred"
+  count = local.docker_hub_credentials_enabled ? 1 : 0
+
+  name = "ecr-pullthroughcache/${var.project_name}-docker-hub-cred"
 }
 
-resource "aws_secretsmanager_secret_version" "docker_hub_credentials_version" {
-  secret_id = aws_secretsmanager_secret.docker_hub.id
+resource "aws_secretsmanager_secret_version" "docker_hub" {
+  count = local.docker_hub_credentials_enabled ? 1 : 0
+
+  secret_id = aws_secretsmanager_secret.docker_hub[0].id
   secret_string = jsonencode({
     username    = var.docker_hub_username
-    accessToken = var.docker_hub_password
+    accessToken = var.docker_hub_access_token
   })
 }
 
-# Amazon Linux 2023 AMI ID를 검색하는 데이터 소스 설정
-data "aws_ami" "al2023" {
-  most_recent = true       # 최신 AMI를 가져오도록 설정
-  owners      = ["amazon"] # AMI 소유자가 Amazon인 것만 필터링
+resource "aws_ecr_pull_through_cache_rule" "docker_hub" {
+  ecr_repository_prefix = var.pull_through_cache_prefix
+  upstream_registry_url = "registry-1.docker.io"
+  credential_arn        = local.docker_hub_credentials_enabled ? aws_secretsmanager_secret.docker_hub[0].arn : null
 
-  filter {
-    name   = "name"           # 필터 조건: 이름이 특정 패턴과 일치해야 함
-    values = ["al2023-ami-*"] # Amazon Linux 2023 AMI 이름 패턴과 일치하는 값만 가져옴
-  }
-
-  filter {
-    name   = "architecture" # 필터 조건: 아키텍처가 특정 값과 일치해야 함
-    values = ["x86_64"]     # x86_64 아키텍처 AMI만 가져옴
+  lifecycle {
+    precondition {
+      condition     = local.docker_hub_credentials_enabled
+      error_message = "Docker Hub pull-through cache creation requires docker_hub_username and docker_hub_access_token in this environment."
+    }
   }
 }
 
-# AWS EC2 인스턴스 리소스를 정의
-resource "aws_instance" "example" {
-  ami                         = data.aws_ami.al2023.id # 위에서 정의한 Amazon Linux 2023 AMI ID를 사용
-  instance_type               = "t3.micro"             # EC2 인스턴스 타입을 t3.micro로 설정
+resource "random_string" "key_suffix" {
+  length  = 6
+  special = false
+  upper   = false
+}
+
+resource "tls_private_key" "instance" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "instance" {
+  key_name   = "${var.project_name}-${random_string.key_suffix.result}"
+  public_key = tls_private_key.instance.public_key_openssh
+}
+
+resource "aws_iam_role" "instance" {
+  name_prefix = "${var.project_name}-ec2-"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ecr_pull_through_cache" {
+  name_prefix = "${var.project_name}-ecr-"
+  role        = aws_iam_role.instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:BatchImportUpstreamImage",
+          "ecr:CreateRepository",
+          "ecr:DescribeImages",
+          "ecr:DescribePullThroughCacheRules",
+          "ecr:DescribeRepositories",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "instance" {
+  name_prefix = "${var.project_name}-ec2-"
+  role        = aws_iam_role.instance.name
+}
+
+resource "aws_security_group" "instance" {
+  name_prefix = "${var.project_name}-ssh-"
+  description = "Allow SSH access for the ECR practice EC2 instance"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description = "SSH access"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_ssh_cidr_blocks
+  }
+
+  egress {
+    description = "Outbound internet access"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_instance" "main" {
+  ami                         = data.aws_ssm_parameter.al2023_ami.value
   associate_public_ip_address = true
-  key_name                    = aws_key_pair.example.key_name
-}
+  iam_instance_profile        = aws_iam_instance_profile.instance.name
+  instance_type               = var.instance_type
+  key_name                    = aws_key_pair.instance.key_name
+  subnet_id                   = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids      = [aws_security_group.instance.id]
+  user_data                   = <<-EOT
+    #!/bin/bash
+    dnf install -y docker awscli
+    systemctl enable --now docker
+    usermod -aG docker ec2-user
+  EOT
 
-resource "random_integer" "random_name" {
-  min = 10000
-  max = 99999
-}
-
-resource "aws_key_pair" "example" {
-  key_name   = "my-key-${random_integer.random_name.result}"
-  public_key = file(var.key_path)
+  tags = {
+    Name = "${var.project_name}-ec2"
+  }
 }
