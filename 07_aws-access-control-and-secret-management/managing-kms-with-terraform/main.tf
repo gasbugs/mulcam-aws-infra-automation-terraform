@@ -34,7 +34,8 @@ resource "aws_kms_key" "s3_encryption_key" {
         Sid : "Enable IAM User Permissions",
         Effect : "Allow",
         Principal : {
-          "AWS" : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/user0"
+          # 루트 계정에 KMS 키 전체 권한 부여 — IAM 정책으로 세부 접근 제어 가능
+          "AWS" : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
         },
         Action : "kms:*",
         Resource : "*"
