@@ -1,8 +1,14 @@
-# SSH 연결을 위한 보안 그룹 생성 (22번 포트 오픈)
+# 보안 그룹 생성 — EC2에 대한 SSH(22번 포트) 접속을 허용하는 방화벽 규칙
 resource "aws_security_group" "ssh_sg" {
   name        = "ssh-access-sg"
   description = "Allow SSH access"
   vpc_id      = module.vpc.vpc_id
+
+  # 리소스를 식별하고 환경을 구분하기 위한 태그
+  tags = {
+    Name        = "${var.environment}-ec2-sg"
+    Environment = var.environment
+  }
 
   ingress {
     from_port   = 22 # SSH 포트
@@ -19,19 +25,32 @@ resource "aws_security_group" "ssh_sg" {
   }
 }
 
-# 1000에서 9999 사이의 랜덤한 숫자를 생성하여 키 이름에 사용
+# 키 이름 충돌 방지를 위한 랜덤 숫자 생성
 resource "random_integer" "key_name" {
   min = 1000
   max = 9999
 }
 
-# AWS 키 페어 생성
-resource "aws_key_pair" "ec2_key_pair" {
-  key_name   = "ec2-key-${random_integer.key_name.result}" # 랜덤한 숫자를 포함하는 키 이름 생성
-  public_key = file(var.key_path)                          # 지정된 경로에서 public key 가져오기
+# RSA 키 쌍 자동 생성 — 외부 파일 없이 Terraform이 직접 SSH 키를 생성
+resource "tls_private_key" "ec2_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
 }
 
+# AWS에 공개 키 등록 — EC2 접속 시 사용할 키페어를 AWS에 업로드
+resource "aws_key_pair" "ec2_key_pair" {
+  key_name   = "ec2-key-${random_integer.key_name.result}" # 랜덤 숫자를 포함하는 고유 키 이름
+  public_key = tls_private_key.ec2_key.public_key_openssh  # 자동 생성된 공개 키 사용
+}
 
+# 프라이빗 키를 로컬 파일로 저장 — SSH 접속 시 사용할 .pem 파일 생성
+resource "local_file" "private_key" {
+  content         = tls_private_key.ec2_key.private_key_pem
+  filename        = "${path.module}/ec2-key.pem"
+  file_permission = "0400" # 소유자만 읽기 가능 (SSH 보안 요구사항)
+}
+
+# AL2023 최신 AMI 자동 조회 — 항상 최신 이미지를 사용하도록 동적으로 조회
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -47,9 +66,9 @@ data "aws_ami" "al2023" {
   }
 }
 
-# EC2 인스턴스 생성
+# EC2 인스턴스 생성 — Secrets Manager에서 Aurora DB 비밀번호를 조회하는 실습용 서버
 resource "aws_instance" "ec2_instance" {
-  ami                         = data.aws_ami.al2023.id                             # AMI ID는 변수로 입력받음
+  ami                         = data.aws_ami.al2023.id                             # 최신 AL2023 AMI 사용
   instance_type               = "t3.micro"                                         # 인스턴스 타입 설정
   key_name                    = aws_key_pair.ec2_key_pair.key_name                 # 생성된 키 페어 이름 사용
   iam_instance_profile        = aws_iam_instance_profile.ec2_instance_profile.name # IAM 인스턴스 프로파일 연결
@@ -58,16 +77,29 @@ resource "aws_instance" "ec2_instance" {
 
   # SSH 연결을 위해 생성한 보안 그룹 적용
   vpc_security_group_ids = [aws_security_group.ssh_sg.id]
+
+  # 리소스를 식별하고 환경을 구분하기 위한 태그
+  tags = {
+    Name        = "${var.environment}-secrets-demo-ec2"
+    Environment = var.environment
+  }
 }
 
-# EC2 인스턴스에 연결할 IAM 인스턴스 프로파일 생성
+# 인스턴스 프로파일 생성 — IAM 역할을 EC2에 연결하는 중간 매개체
 resource "aws_iam_instance_profile" "ec2_instance_profile" {
-  name = "EC2SecretsManagerInstanceProfile"
+  name = "${var.environment}-ec2-secrets-profile" # 환경별로 구분되는 인스턴스 프로파일 이름
   role = aws_iam_role.ec2_secrets_manager_role.name
 }
 
+# EC2 IAM 역할 생성 — EC2가 Secrets Manager와 KMS에 접근할 수 있는 역할
 resource "aws_iam_role" "ec2_secrets_manager_role" {
-  name = "EC2SecretsManagerRole"
+  name = "${var.environment}-ec2-secrets-role" # 환경별로 구분되는 IAM 역할 이름
+
+  # 리소스를 식별하고 환경을 구분하기 위한 태그
+  tags = {
+    Name        = "${var.environment}-ec2-secrets-role"
+    Environment = var.environment
+  }
 
   assume_role_policy = jsonencode({
     "Version" : "2012-10-17",
@@ -85,8 +117,9 @@ resource "aws_iam_role" "ec2_secrets_manager_role" {
 
 data "aws_caller_identity" "current" {}
 
+# Secrets Manager 접근 정책 — EC2가 Aurora DB 비밀번호를 읽을 수 있는 권한
 resource "aws_iam_policy" "secrets_manager_policy" {
-  name        = "SecretsManagerAccessPolicy"
+  name        = "${var.environment}-ec2-secrets-policy" # 환경별로 구분되는 IAM 정책 이름
   description = "Policy to allow EC2 access to Secrets Manager"
   policy = jsonencode({
     "Version" : "2012-10-17",
@@ -102,8 +135,8 @@ resource "aws_iam_policy" "secrets_manager_policy" {
   })
 }
 
+# 역할에 정책 연결
 resource "aws_iam_role_policy_attachment" "attach_policy" {
   role       = aws_iam_role.ec2_secrets_manager_role.name
   policy_arn = aws_iam_policy.secrets_manager_policy.arn
 }
-

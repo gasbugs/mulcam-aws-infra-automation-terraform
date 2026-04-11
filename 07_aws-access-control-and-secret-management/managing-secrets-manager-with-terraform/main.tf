@@ -1,23 +1,33 @@
 ###############
 # Secret Manager를 활용한 RDS 패스워드와 교체를 위한 람다 설정
-# KMS 키 생성 (시크릿 암호화에 사용)
+
+# Secrets Manager 암호화 KMS 키 — 시크릿 데이터를 암호화할 마스터 키
 resource "aws_kms_key" "example_key" {
   description             = var.kms_description
-  deletion_window_in_days = 10
+  deletion_window_in_days = 30   # 키 삭제 시 복구할 수 있는 기간 (30일)
+  enable_key_rotation     = true # 1년 주기로 KMS 키 자동 교체 (보안 모범사례)
 }
 
+# KMS 키 별칭 설정 — Secrets Manager 암호화 키를 별칭으로 쉽게 식별
+resource "aws_kms_alias" "secrets_kms_key_alias" {
+  name          = "alias/${var.environment}-secrets-manager-key"
+  target_key_id = aws_kms_key.example_key.key_id
+}
+
+# 고유한 시크릿 이름 생성을 위한 랜덤 숫자
 resource "random_integer" "secret_suffix" {
   min = 1000
   max = 9999
 }
 
-# AWS Secrets Manager 시크릿 생성
+# 시크릿 컨테이너 생성 — 비밀번호 등 민감 정보를 저장하는 금고를 AWS에 생성
 resource "aws_secretsmanager_secret" "example_secret" {
   name        = "${var.secret_name}-${random_integer.secret_suffix.result}"
   description = var.secret_description
   kms_key_id  = aws_kms_key.example_key.arn
 }
 
+# 시크릿 초기 비밀번호 생성 — 복잡한 비밀번호를 자동으로 만들어 Secrets Manager에 저장
 resource "random_string" "example" {
   length  = 16    # 생성할 문자열의 길이
   special = false # 특수문자 포함 여부
@@ -26,8 +36,7 @@ resource "random_string" "example" {
   numeric = true  # 숫자 포함 여부
 }
 
-
-# AWS Secrets Manager 시크릿 버전 생성 (초기 값)
+# 시크릿 초기값 설정 — JSON 형식으로 사용자명과 비밀번호를 금고에 저장
 resource "aws_secretsmanager_secret_version" "example_secret_version" {
   secret_id = aws_secretsmanager_secret.example_secret.id
   secret_string = jsonencode({
@@ -36,7 +45,7 @@ resource "aws_secretsmanager_secret_version" "example_secret_version" {
   })
 }
 
-# ZIP 파일 생성 (lambda_function.zip)
+# Lambda 코드 패키징 — Python 소스 파일을 ZIP으로 묶어 Lambda에 업로드
 data "archive_file" "rotate_secret" {
   type = "zip" # ZIP 파일 형식
 
@@ -44,12 +53,12 @@ data "archive_file" "rotate_secret" {
   output_path = "${path.module}/rotate_secret.zip" # 생성된 ZIP 파일 경로
 }
 
-# Lambda 함수 생성
+# 비밀번호 로테이션 Lambda 함수 — 30일마다 자동으로 비밀번호를 교체하는 함수
 resource "aws_lambda_function" "rotate_secret" {
   function_name = var.lambda_function_name
   role          = aws_iam_role.lambda_secrets_manager_role.arn
   handler       = "rotate_secret.lambda_handler"
-  runtime       = "python3.8"
+  runtime       = "python3.12" # Python 3.12 런타임 (python3.8은 2024년 10월 EOL)
 
   # Lambda 코드 (Zip 파일로 저장됨)
   filename         = data.archive_file.rotate_secret.output_path
@@ -62,7 +71,7 @@ resource "aws_lambda_function" "rotate_secret" {
   }
 }
 
-# IAM 역할 생성 (Lambda 함수에서 Secrets Manager 접근 허용)
+# Lambda 실행 역할 — Lambda 함수가 Secrets Manager와 KMS에 접근할 수 있는 IAM 역할
 resource "aws_iam_role" "lambda_secrets_manager_role" {
   name = "lambda-secrets-manager-role"
 
@@ -80,7 +89,7 @@ resource "aws_iam_role" "lambda_secrets_manager_role" {
   })
 }
 
-# IAM 정책 생성 및 역할에 부착 (Secrets Manager 및 CloudWatch Logs 접근 허용)
+# Lambda Secrets Manager 접근 정책 — 시크릿 읽기/쓰기 권한을 Lambda에 부여
 resource "aws_iam_policy" "lambda_secrets_manager_policy" {
   name        = "lambda-secrets-manager-policy"
   description = "Policy to allow Lambda to access Secrets Manager and CloudWatch Logs"
@@ -108,13 +117,13 @@ resource "aws_iam_policy" "lambda_secrets_manager_policy" {
   })
 }
 
-# IAM 정책을 IAM 역할에 부착
+# 역할에 정책 연결 — Lambda 역할에 Secrets Manager 접근 권한을 부여
 resource "aws_iam_role_policy_attachment" "attach_lambda_policy" {
   role       = aws_iam_role.lambda_secrets_manager_role.name
   policy_arn = aws_iam_policy.lambda_secrets_manager_policy.arn
 }
 
-# KMS에 접근할 수 있는 권한 추가
+# Lambda KMS 접근 정책 — 시크릿 암호화/복호화에 필요한 KMS 권한
 resource "aws_iam_policy" "lambda_kms_policy" {
   name        = "LambdaKMSAccessPolicy"
   description = "Policy to allow Lambda to use the KMS key for Secrets Manager"
@@ -135,13 +144,13 @@ resource "aws_iam_policy" "lambda_kms_policy" {
   })
 }
 
-# Lambda 역할에 KMS 접근 정책 부착
+# 역할에 정책 연결 — Lambda 역할에 KMS 암호화 권한을 부여
 resource "aws_iam_role_policy_attachment" "attach_kms_policy" {
   role       = aws_iam_role.lambda_secrets_manager_role.name
   policy_arn = aws_iam_policy.lambda_kms_policy.arn
 }
 
-# Secrets Manager 시크릿 로테이션 설정
+# 자동 로테이션 설정 — Lambda를 통해 30일 주기로 시크릿을 자동 갱신
 resource "aws_secretsmanager_secret_rotation" "example" {
   secret_id           = aws_secretsmanager_secret.example_secret.id
   rotation_lambda_arn = aws_lambda_function.rotate_secret.arn
@@ -152,7 +161,7 @@ resource "aws_secretsmanager_secret_rotation" "example" {
   }
 }
 
-# Secrets Manager가 Lambda 함수를 호출할 수 있도록 권한 부여
+# Lambda 호출 권한 — Secrets Manager가 Lambda 함수를 실행할 수 있도록 허용
 resource "aws_lambda_permission" "allow_secrets_manager" {
   statement_id  = "AllowSecretsManagerInvocation"
   action        = "lambda:InvokeFunction"

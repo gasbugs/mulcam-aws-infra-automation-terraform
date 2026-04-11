@@ -1,16 +1,22 @@
-# Terraform 및 AWS 프로바이더 버전 설정
+# AWS 프로바이더 설정 — Secrets Manager와 KMS, Lambda 등을 관리하는 설정 블록
 terraform {
-  required_version = ">= 1.13.4" # Terraform 최소 요구 버전
+  required_version = ">= 1.13.4"
   required_providers {
+    # AWS 서비스를 생성·관리하는 공식 프로바이더
     aws = {
-      source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+    # 랜덤 비밀번호 및 고유 이름 생성용 프로바이더
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
     }
   }
 }
 
-# AWS 프로바이더 설정
+# 실제 AWS 연결 설정 — 어느 리전에, 어떤 자격증명으로 접속할지 정의
 provider "aws" {
-  region  = var.aws_region  # 리소스를 배포할 AWS 리전
-  profile = var.aws_profile # 인증에 사용할 AWS CLI 프로파일
+  region  = var.aws_region
+  profile = var.aws_profile
 }

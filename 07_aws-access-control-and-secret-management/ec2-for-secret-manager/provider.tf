@@ -1,16 +1,32 @@
-# Terraform 및 AWS 프로바이더 버전 설정
+# AWS 프로바이더 설정 — EC2와 Secrets Manager 접근 실습을 위한 설정 블록
 terraform {
-  required_version = ">= 1.13.4" # Terraform 최소 요구 버전
+  required_version = ">= 1.13.4"
   required_providers {
+    # AWS 서비스를 생성·관리하는 공식 프로바이더
     aws = {
-      source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+    # SSH 키 쌍을 Terraform 내부에서 자동 생성하는 프로바이더
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    # 생성된 프라이빗 키를 로컬 파일로 저장하는 프로바이더
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
+    }
+    # 고유한 이름 생성을 위한 랜덤 값 프로바이더
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
     }
   }
 }
 
-# AWS 프로바이더 설정
+# 실제 AWS 연결 설정
 provider "aws" {
-  region  = var.aws_region  # 리소스를 배포할 AWS 리전
-  profile = var.aws_profile # 인증에 사용할 AWS CLI 프로파일
+  region  = var.aws_region
+  profile = var.aws_profile
 }

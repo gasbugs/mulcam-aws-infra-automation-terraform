@@ -1,5 +1,4 @@
-# VPC Module
-# VPC 모듈 생성
+# VPC 생성 — Aurora DB와 EC2를 격리된 네트워크 환경에 배치하기 위한 가상 네트워크
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "6.5.0" # 원하는 버전으로 설정
@@ -39,10 +38,17 @@ module "vpc" {
   }
 }
 
+# Aurora 보안 그룹 — EC2에서만 MySQL 포트(3306)에 접근 허용
 resource "aws_security_group" "rds_sg" {
   name        = "rds-security-group"    # 보안 그룹 이름
   description = "Allow database access" # 보안 그룹 설명
   vpc_id      = module.vpc.vpc_id       # VPC ID
+
+  # 리소스를 식별하고 환경을 구분하기 위한 태그
+  tags = {
+    Name        = "${var.environment}-aurora-sg"
+    Environment = var.environment
+  }
 
   ingress {
     from_port   = 3306               # 시작 포트 (MySQL 기본 포트)
@@ -59,24 +65,28 @@ resource "aws_security_group" "rds_sg" {
   }
 }
 
+# DB 서브넷 그룹 — Aurora가 사용할 데이터베이스 전용 서브넷 지정
 resource "aws_db_subnet_group" "this" {
   name       = "${var.vpc_name}-db-subnet-group-0" # DB 서브넷 그룹 이름
   subnet_ids = module.vpc.database_subnets         # 프라이빗 서브넷 ID 목록
 
+  # 리소스를 식별하고 환경을 구분하기 위한 태그
   tags = {
-    Name = "${var.vpc_name}-db-subnet-group" # 태그 이름 설정
+    Name        = "${var.vpc_name}-db-subnet-group" # 태그 이름 설정
+    Environment = var.environment
   }
 }
 
+# Aurora MySQL 클러스터 — 자동 Secrets Manager 비밀번호 관리를 활성화한 고가용성 DB
 resource "aws_rds_cluster" "my_aurora_cluster" {
   cluster_identifier            = "${var.cluster_identifier}-0"  # 클러스터 ID
   engine                        = "aurora-mysql"                 # 엔진 종류 (MySQL 호환 Aurora)
   engine_version                = var.db_engine_version          # 엔진 버전
   master_username               = var.db_username                # 관리자 계정 이름
-  manage_master_user_password   = true                           # 패스워드 자동 관리 
-  master_user_secret_kms_key_id = aws_kms_key.example_key.id     # 속성을 지정하여 특정 KMS 키를 지정
+  manage_master_user_password   = true                           # 패스워드 자동 관리
+  master_user_secret_kms_key_id = aws_kms_key.example_key.id     # 특정 KMS 키로 시크릿 암호화
   storage_encrypted             = true                           # 스토리지 암호화 여부
-  kms_key_id                    = aws_kms_key.example_key.arn    # 스토리지 암호화에 사용되는 키 
+  kms_key_id                    = aws_kms_key.example_key.arn    # 스토리지 암호화에 사용되는 키
   db_subnet_group_name          = aws_db_subnet_group.this.name  # DB 서브넷 그룹 이름
   vpc_security_group_ids        = [aws_security_group.rds_sg.id] # VPC 보안 그룹 ID
   skip_final_snapshot           = true                           # 삭제 시 최종 스냅샷 생성 여부
@@ -91,6 +101,7 @@ resource "aws_rds_cluster" "my_aurora_cluster" {
   }
 }
 
+# Aurora DB 인스턴스 — 클러스터의 실제 컴퓨팅 노드
 resource "aws_rds_cluster_instance" "my_aurora_instance" {
   count                = 1                                    # 쓰기, 읽기, 읽기
   cluster_identifier   = aws_rds_cluster.my_aurora_cluster.id # 클러스터 ID
@@ -107,10 +118,17 @@ resource "aws_rds_cluster_instance" "my_aurora_instance" {
   }
 }
 
-# KMS 키 생성 (시크릿 암호화에 사용)
+# Aurora 암호화용 KMS 키 — DB 스토리지와 Secrets Manager 시크릿을 암호화하는 마스터 키
 resource "aws_kms_key" "example_key" {
   description             = var.kms_description
-  deletion_window_in_days = 10
+  deletion_window_in_days = 30   # 키 삭제 대기 기간 (일) — 실수로 삭제한 경우 복구 기간 (30일)
+  enable_key_rotation     = true # 1년 주기로 KMS 키 자동 교체 (보안 모범사례)
+
+  # 리소스를 식별하고 환경을 구분하기 위한 태그
+  tags = {
+    Name        = "${var.environment}-aurora-kms-key"
+    Environment = var.environment
+  }
 
   policy = jsonencode({
     Version = "2012-10-17",
@@ -157,6 +175,13 @@ resource "aws_kms_key" "example_key" {
   })
 }
 
+# KMS 키 별칭 설정 — Aurora 데이터베이스 암호화 키를 별칭으로 식별
+resource "aws_kms_alias" "aurora_kms_key_alias" {
+  name          = "alias/${var.environment}-aurora-encryption-key"
+  target_key_id = aws_kms_key.example_key.key_id
+}
+
+# 시크릿 이름 충돌 방지를 위한 랜덤 숫자 생성
 resource "random_integer" "secret_suffix" {
   min = 1000
   max = 9999
