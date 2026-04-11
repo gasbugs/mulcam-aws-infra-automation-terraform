@@ -66,6 +66,11 @@ resource "aws_kms_alias" "s3_kms_key_alias" {
 resource "aws_s3_bucket" "example_bucket" {
   bucket = "${var.bucket_name}-${random_integer.unique_value.result}" # 변수와 랜덤 숫자를 사용한 버킷 이름
 
+  # 버전 관리가 활성화된 버킷은 객체 버전이 남아 있으면 terraform destroy 시 삭제 실패
+  # force_destroy = true 로 설정하면 버킷 안의 모든 객체·버전을 자동 삭제 후 버킷을 제거
+  # 실무에서는 사용 금지 — 실수로 apply 후 destroy 시 데이터가 복구 불가능하게 전부 삭제됨
+  force_destroy = true
+
   # 리소스를 식별하고 환경을 구분하기 위한 태그
   tags = {
     Name        = "${var.environment}-encrypted-bucket"
