@@ -24,6 +24,49 @@ resource "aws_security_group" "ec2_sg" {
   }
 }
 
+# ECR 접근 권한을 EC2에 부여하기 위한 IAM 역할 생성
+resource "aws_iam_role" "ec2_role" {
+  name = "ec2-ecr-access-role"
+
+  # EC2 서비스가 이 역할을 맡을(assume) 수 있도록 허용
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
+
+# ECR 전체 접근 권한(push/pull) 부여 — EC2에서 이미지를 빌드하고 푸시할 수 있도록 설정
+resource "aws_iam_role_policy_attachment" "ec2_ecr_policy" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess"
+}
+
+# EC2 → EKS 클러스터 조회 권한 부여 (aws eks update-kubeconfig 실행 시 필요)
+# AmazonEKSClusterPolicy는 클러스터 서비스 역할용이므로 직접 정책을 인라인으로 부여
+resource "aws_iam_role_policy" "ec2_eks_describe" {
+  name = "eks-describe-policy"
+  role = aws_iam_role.ec2_role.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["eks:DescribeCluster", "eks:ListClusters"]
+      Resource = "*"
+    }]
+  })
+}
+
+# IAM 인스턴스 프로파일 — EC2 인스턴스에 IAM 역할을 연결하기 위한 중간 오브젝트
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "ec2-ecr-access-profile"
+  role = aws_iam_role.ec2_role.name
+}
+
 module "ec2_instance" {
   source  = "terraform-aws-modules/ec2-instance/aws"
   version = "~> 6.0" # AWS 프로바이더 v6와 호환되는 최신 버전 (5.x는 cpu_core_count 등 제거된 인수 포함)
@@ -35,7 +78,8 @@ module "ec2_instance" {
 
   ami = data.aws_ami.al2023.id
 
-  key_name = aws_key_pair.my_key_pair.key_name # EC2에 연결할 SSH 키 이름
+  key_name             = aws_key_pair.my_key_pair.key_name          # EC2에 연결할 SSH 키 이름
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name  # ECR/EKS 접근 IAM 프로파일
 
   vpc_security_group_ids = [aws_security_group.ec2_sg.id] # 보안 그룹 연결
   subnet_id              = module.vpc.public_subnets[0]   # 서브넷 ID

@@ -69,8 +69,6 @@ module "eks" {
   enable_cluster_creator_admin_permissions = true  # 클러스터 생성자에게 관리 권한 부여
   endpoint_private_access                  = true  # 클러스터의 프라이빗 엔드포인트 접근을 허용
 
-  # DaemonSet 기반 애드온만 모듈 내에서 설치 (노드 없이도 ACTIVE 전환 가능)
-  # aws-ebs-csi-driver는 Deployment 기반이므로 노드그룹 이후에 별도 리소스로 설치
   addons = {
     vpc-cni = {
       resolve_conflicts_on_create = "OVERWRITE" # 노드 네트워크에 반드시 필요한 CNI 플러그인
@@ -127,22 +125,6 @@ module "eks" {
   }
 }
 
-# -----------------------------------------------------------------------
-# 노드 의존 애드온 — 노드그룹 생성 완료 후 설치
-# aws-ebs-csi-driver는 Deployment 기반이라 노드가 있어야 ACTIVE 전환
-# -----------------------------------------------------------------------
-
-# EBS 볼륨을 Kubernetes PV로 사용하기 위한 드라이버 (Deployment 기반 → 노드 필요)
-resource "aws_eks_addon" "ebs_csi_driver" {
-  cluster_name                = module.eks.cluster_name
-  addon_name                  = "aws-ebs-csi-driver"
-  service_account_role_arn    = module.irsa-ebs-csi.iam_role_arn # IRSA로 연동된 역할의 ARN 사용
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
-
-  depends_on = [module.eks_managed_node_groups]
-}
-
 module "eks_managed_node_groups" {
   source  = "terraform-aws-modules/eks/aws//modules/eks-managed-node-group" # EKS 관리형 노드 그룹 모듈 경로
   version = "21.8"                                                          # 모듈 버전
@@ -151,6 +133,7 @@ module "eks_managed_node_groups" {
   cluster_name         = module.eks.cluster_name         # EKS 클러스터 이름
   cluster_service_cidr = module.eks.cluster_service_cidr # 클러스터 서비스 CIDR
   subnet_ids           = module.vpc.private_subnets      # 사설 서브넷 ID
+  kubernetes_version   = "1.34"                          # 클러스터 버전과 일치시켜야 AMI 선택 오류 방지
 
   ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
   instance_types = ["c5.large"]             # 노드 인스턴스 유형
@@ -197,22 +180,4 @@ resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
 */
 
 
-# EBS CSI 드라이버 정책을 불러옴
-# EKS 클러스터에서 사용될 EBS CSI 드라이버 IAM 정책 정의
-data "aws_iam_policy" "ebs_csi_policy" {
-  arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-}
-
-# IRSA(Identity and Access Management Roles for Service Accounts) 모듈을 정의
-# EKS 클러스터에 EBS CSI 드라이버와 연동할 역할을 생성
-module "irsa-ebs-csi" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc" # IAM 모듈의 경로
-  version = "4.20"                                                                # 모듈 버전
-
-  create_role                   = true                                                        # 역할을 생성하도록 설정
-  role_name                     = "AmazonEKSTFEBSCSIRole-${module.eks.cluster_name}"          # 역할 이름 설정
-  provider_url                  = module.eks.oidc_provider                                    # EKS OIDC 프로바이더 URL
-  role_policy_arns              = [data.aws_iam_policy.ebs_csi_policy.arn]                    # EBS CSI 드라이버 정책 ARN
-  oidc_fully_qualified_subjects = ["system:serviceaccount:kube-system:ebs-csi-controller-sa"] # OIDC 주체 설정
-}
 
