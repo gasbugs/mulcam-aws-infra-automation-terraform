@@ -8,31 +8,17 @@ variable "aws_region" {
   default = "us-east-1"
 }
 
-variable "project_name" {
-  default = "gasbugs/my-cicd-app"
-}
-
 variable "app_name" {
-  default = "my-cicd-app"
+  default     = "flask-example"
+  description = "앱 이름 — ECR 저장소명, CodeBuild 프로젝트명, 파이프라인명에 사용"
 }
 
 ### locals
-resource "random_string" "webhook_secret" {
-  length  = 32
-  special = true
-  upper   = true
-  lower   = true
-  numeric = true
-}
-
 resource "time_static" "this" {
-  # 이 tf 파일에서 생성되는 리소스들의 이름에서 suffix로 사용하기 위함
+  # 이 tf 파일에서 생성되는 리소스들의 이름 suffix로 사용 (재배포 시 이름 충돌 방지)
 }
 
 locals {
-  # 웹 훅에 사용할 시크릿 
-  github_webhook_secret = random_string.webhook_secret.result
-
   # 파이프라인에 사용할 이름 구성
   subject     = var.app_name
   time_static = formatdate("YYYYMMDDHHmm", time_static.this.rfc3339)
@@ -47,12 +33,12 @@ locals {
     Organization = "cloudsecuritylab"
   }
 
-  # 배포할 리소스들(CodeBuild, CodePipeline, LogGroup, EventRule, EventTarget)에 대한 aws 정보들
+  # 배포할 리소스들에 대한 AWS 계정 정보
   account_id    = data.aws_caller_identity.current.account_id
-  ecr_repo_name = var.app_name
+  ecr_repo_name = var.app_name # ECR 저장소 이름 = 앱 이름 (flask-example)
 }
 
-# 유니크 ID
+# 유니크 ID — IAM 역할 이름 중복 방지용
 resource "random_integer" "unique_id" {
   min = 1000
   max = 9999

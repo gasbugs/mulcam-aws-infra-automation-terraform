@@ -1,122 +1,183 @@
-# EKS + CI/CD 파이프라인 실습 (직접 구성 버전)
+# cicd-pipeline-practice — Flask CI/CD 파이프라인 실습 (직접 구성 버전)
 
-## 실습 목표
+## 학습 목표
 
-이 실습을 통해 다음을 배울 수 있습니다:
+`cicd-pipeline`(완성 버전)을 참고하여 아래 리소스를 직접 작성하는 실습입니다:
 
-- `cicd-pipeline` 완성 코드를 참고하면서, 직접 코드를 작성하며 CI/CD 파이프라인을 구성하는 방법
-- CodePipeline, CodeBuild, ECR, EKS의 각 연결 고리를 이해하고 직접 IAM 정책을 작성하는 방법
+- CodeCommit 저장소 생성 (`flask-example`, `flask-example-apps`)
+- CodePipeline Source 스테이지를 CodeCommit 저장소로 구성
+- EventBridge로 CodeCommit push → 파이프라인 자동 트리거 설정
+- ArgoCD SSH 인증 리소스 작성 (IAM 유저 + SSH 키 + Kubernetes Secret)
 
-> **참고:** 이 프로젝트는 `cicd-pipeline`의 실습 버전입니다.
-> 완성된 참조 코드는 `cicd-pipeline` 디렉토리를 확인하세요.
+## 실습 구조
 
----
+이 디렉토리의 파일들은 `cicd-pipeline`과 동일하게 동작합니다.
+변수명만 일부 다르게 구성되어 있습니다:
+- `var.app_name` (기본값: `flask-example`) — ECR 저장소명 및 파이프라인 이름에 사용
 
-## 사전 요구 사항
+## 사전 요구사항
 
-| 도구 | 버전 | 확인 명령어 |
-|------|------|------------|
-| AWS CLI | 최신 | `aws --version` |
-| Terraform | >= 1.13.4 | `terraform version` |
-| kubectl | 최신 | `kubectl version --client` |
-| Helm | >= 3.1 | `helm version` |
-| GitHub 계정 | - | CodeStar Connection 승인 필요 |
-
----
-
-## 아키텍처 개요
-
-```
-GitHub 레포지토리
-  │ 코드 Push
-  ▼
-CodePipeline
-  ├── Source (GitHub)
-  ├── Build  (CodeBuild → ECR Push)
-  └── Deploy (ArgoCD → EKS 배포)
-
-[지원 인프라]
-  ├── S3 버킷        ── 아티팩트 저장
-  ├── ECR            ── 이미지 저장소
-  └── EKS 클러스터   ── 배포 대상
-```
+- AWS CLI 설정 완료 (`my-profile` 프로파일)
+- `eksctl`, `kubectl`, `git` 설치
+- Terraform >= 1.13.4
 
 ---
 
-## 주요 리소스
-
-`cicd-pipeline`과 동일한 리소스를 구성합니다:
-
-| 리소스 | 설명 |
-|--------|------|
-| S3 버킷 | 파이프라인 아티팩트 저장 |
-| ECR 레지스트리 | 컨테이너 이미지 저장소 |
-| CodeBuild 프로젝트 | 빌드 실행 |
-| CodePipeline | CI/CD 오케스트레이션 |
-| CodeStar Connection | GitHub 연동 |
-| EKS 클러스터 (v1.34) | 배포 대상 |
-| ArgoCD (Helm) | GitOps 배포 |
-
----
-
-## 실습 순서
-
-### 1단계: 초기화
+## 1단계: Terraform 배포
 
 ```bash
 cd 10_eks-with-cicd/cicd-pipeline-practice
 terraform init
-```
-
-### 2단계: 배포
-
-```bash
 terraform apply
 ```
 
-### 3단계: GitHub 연결 승인
+> ⏱ 소요 시간: 약 20~30분
 
-AWS 콘솔 → Developer Tools → Connections에서 생성된 연결을 승인합니다.
-
-### 4단계: kubeconfig 설정
-
+배포 완료 후 출력값 확인:
 ```bash
-aws eks update-kubeconfig \
-  --name $(terraform output -raw cluster_name) \
-  --region us-east-1 \
-  --profile my-profile
+terraform output
+# codecommit_flask_example_url      = "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/flask-example"
+# codecommit_flask_example_apps_url = "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/flask-example-apps"
+# ecr_repository_url                = "<계정ID>.dkr.ecr.us-east-1.amazonaws.com/flask-example"
 ```
 
-### 5단계: ArgoCD 접속 및 파이프라인 테스트
+---
+
+## 2단계: CodeCommit에 소스 코드 복제
+
+### git credential helper 설정 (최초 1회)
+```bash
+git config --global credential.helper '!aws --profile my-profile codecommit credential-helper $@'
+git config --global credential.UseHttpPath true
+```
+
+### flask-example (앱 소스) 복제 및 push
 
 ```bash
-# ArgoCD 서비스 확인
-kubectl get svc -n argocd
+FLASK_EXAMPLE_URL=$(terraform output -raw codecommit_flask_example_url)
+
+git clone https://github.com/gasbugs/flask-example
+cd flask-example
+git remote add codecommit $FLASK_EXAMPLE_URL
+git push codecommit main
+cd ..
+```
+
+#### buildspec.yml 확인
+
+`gasbugs/flask-example`에 이미 포함되어 있습니다.
+없을 경우 아래 내용으로 레포 루트에 생성하세요:
+
+```yaml
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REPO_URI
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
+  build:
+    commands:
+      - docker build -t $ECR_REPO_URI:$IMAGE_TAG .
+      - docker tag $ECR_REPO_URI:$IMAGE_TAG $ECR_REPO_URI:latest
+  post_build:
+    commands:
+      - docker push $ECR_REPO_URI:$IMAGE_TAG
+      - docker push $ECR_REPO_URI:latest
+      - echo Build complete. Image $ECR_REPO_URI:$IMAGE_TAG
+```
+
+### flask-example-apps (K8s 매니페스트) 복제 및 push
+
+```bash
+FLASK_APPS_URL=$(terraform output -raw codecommit_flask_example_apps_url)
+
+git clone https://github.com/gasbugs/flask-example-apps
+cd flask-example-apps
+git remote add codecommit $FLASK_APPS_URL
+git push codecommit main
+cd ..
+```
+
+---
+
+## 3단계: 파이프라인 실행 트리거
+
+```bash
+cd flask-example
+echo "# trigger" >> README.md
+git add README.md
+git commit -m "test: trigger CI pipeline"
+git push codecommit main
+```
+
+---
+
+## 4단계: 파이프라인 및 ArgoCD 확인
+
+```bash
+# ECR 이미지 확인
+aws ecr describe-images \
+  --repository-name flask-example \
+  --region us-east-1 --profile my-profile \
+  --query 'imageDetails[].[imageTags[0],imagePushedAt]' \
+  --output table
+
+# ArgoCD 서비스 주소 확인
+kubectl get svc -n argocd argocd-server
 
 # ArgoCD 초기 비밀번호
 kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath="{.data.password}" | base64 -d
+  -o jsonpath="{.data.password}" | base64 -d && echo
+
+# flask-app 배포 상태
+kubectl get pods -n flask-app
 ```
 
-### 6단계: 리소스 삭제
+---
+
+## 5단계: 이미지 태그 업데이트 (GitOps 테스트)
 
 ```bash
-terraform destroy
+cd flask-example-apps
+
+NEW_TAG=$(aws ecr describe-images --repository-name flask-example \
+  --region us-east-1 --profile my-profile \
+  --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageTags[0]' \
+  --output text)
+
+# deployment.yaml의 이미지 태그 수정
+ECR_URL=$(terraform output -raw ecr_repository_url)
+sed -i "s|image:.*|image: $ECR_URL:$NEW_TAG|g" deployment.yaml
+
+git add .
+git commit -m "chore: update image to $NEW_TAG"
+git push codecommit main
+
+# ArgoCD 자동 동기화 확인
+kubectl get pods -n flask-app -w
 ```
 
 ---
 
-## 변수 설명
+## 리소스 삭제
 
-| 변수명 | 설명 | 기본값 |
-|--------|------|--------|
-| `aws_region` | 리소스를 배포할 AWS 리전 | `"us-east-1"` |
-| `tf_user` | 리소스 이름에 포함될 사용자 식별자 | `"gasbugs"` |
+```bash
+kubectl delete application flask-app -n argocd
+terraform destroy -auto-approve
+```
 
 ---
 
-## 비용 안내
+## 참고: cicd-pipeline(완성본)과의 차이점
 
-> **주의:** 이 실습을 실행하면 AWS 비용이 발생합니다.
+| 항목 | cicd-pipeline | cicd-pipeline-practice |
+|------|--------------|----------------------|
+| 변수 | 고정값 (`ecr_repo_name = "flask-example"`) | `var.app_name`으로 파라미터화 |
+| 태그 | BlackCompany 팀 태그 | cloudsecuritylab 팀 태그 |
+| 구조 | 동일 | 동일 |
 
-실습 종료 후 반드시 `terraform destroy`를 실행하세요.
+## 주의사항
+
+- **테스트 완료 즉시 `terraform destroy` 실행 필수** (비용 절감)
+- CodeCommit HTTPS 인증은 `credential.helper` 설정이 없으면 실패함
+- EKS + ArgoCD + CodePipeline 동시 실행 시 비용 주의

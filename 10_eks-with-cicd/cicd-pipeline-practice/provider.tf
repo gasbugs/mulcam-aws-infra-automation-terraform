@@ -1,26 +1,33 @@
-# Terraform 및 AWS 프로바이더 버전 설정
+# Terraform 및 프로바이더 버전 설정
 terraform {
-  required_version = ">= 1.13.4" # Terraform 최소 요구 버전
+  required_version = ">= 1.13.4"
   required_providers {
     aws = {
-      source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = ">= 3.1.0" # 3.1.0 버전 이상의 helm 프로바이더 사용
+      version = ">= 2.16"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = ">= 2.0" # ArgoCD 시크릿 및 Application 리소스 생성용
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = ">= 4.0" # ArgoCD CodeCommit SSH 키 자동 생성용
     }
   }
 }
 
 # AWS 프로바이더 설정
 provider "aws" {
-  region  = var.aws_region # 리소스를 배포할 AWS 리전
-  profile = "my-profile"   # 인증에 사용할 AWS CLI 프로파일
+  region  = var.aws_region
+  profile = "my-profile"
 }
 
-
-# # eksctl 명령을 실행하여 kubectl config 설정
+# EKS kubeconfig 자동 설정 — ArgoCD Helm 설치 전에 kubeconfig 준비
 resource "null_resource" "eks_kubectl_config" {
   provisioner "local-exec" {
     command = "eksctl utils write-kubeconfig --cluster ${module.eks.cluster_name} --region ${var.aws_region}"
@@ -32,11 +39,28 @@ resource "null_resource" "eks_kubectl_config" {
 resource "time_sleep" "wait_for_eks" {
   depends_on = [module.eks]
 
-  create_duration = "60s" # 60초 대기
+  create_duration = "60s"
 }
 
+# Helm 프로바이더 — ArgoCD 설치에 사용
 provider "helm" {
   kubernetes = {
     config_path = "${pathexpand("~")}/.kube/config"
+  }
+}
+
+# Kubernetes 프로바이더 — ArgoCD 시크릿 및 Application 리소스 생성에 사용
+provider "kubernetes" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args = [
+      "eks", "get-token",
+      "--cluster-name", module.eks.cluster_name,
+      "--region", var.aws_region,
+      "--profile", "my-profile"
+    ]
   }
 }
