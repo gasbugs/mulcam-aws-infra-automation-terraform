@@ -52,7 +52,7 @@ module "eks" {
   version = "21.8.0"
 
   name               = local.cluster_name
-  kubernetes_version = "1.34"
+  kubernetes_version = "1.35"
 
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
@@ -131,9 +131,6 @@ module "eks_managed_node_groups" {
   cluster_service_cidr = module.eks.cluster_service_cidr # 클러스터 서비스 CIDR
   subnet_ids           = module.vpc.private_subnets      # 사설 서브넷 ID
 
-  # kubernetes_version을 명시적으로 지정 — 미지정 시 최신 버전 AMI를 조회하여
-  # 클러스터 버전(1.34)과 불일치 오류 발생
-  kubernetes_version = "1.34"
 
   ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
   instance_types = ["c5.large"]             # 노드 인스턴스 유형

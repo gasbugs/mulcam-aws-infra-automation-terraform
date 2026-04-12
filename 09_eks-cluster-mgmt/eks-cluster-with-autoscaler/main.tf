@@ -52,7 +52,7 @@ module "eks" {
   version = "21.8.0"
 
   name               = local.cluster_name
-  kubernetes_version = "1.34"
+  kubernetes_version = "1.35"
 
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
@@ -71,7 +71,6 @@ module "eks" {
 # ON_DEMAND 노드 그룹 — EKS 모듈과 분리하여 별도 모듈로 생성
 # Cluster Autoscaler가 이 그룹을 스케일 아웃/인 대상으로 사용
 # ASG 태그: Cluster Autoscaler가 auto-discovery로 대상 ASG를 찾는 데 필요
-# kubernetes_version 명시 필수 — 미지정 시 최신 버전 AMI → 버전 불일치 오류
 # -----------------------------------------------------------------------
 module "eks_managed_node_group_on_demand" {
   source  = "terraform-aws-modules/eks/aws//modules/eks-managed-node-group"
@@ -81,7 +80,6 @@ module "eks_managed_node_group_on_demand" {
   cluster_name         = module.eks.cluster_name
   cluster_service_cidr = module.eks.cluster_service_cidr
   subnet_ids           = module.vpc.private_subnets
-  kubernetes_version   = "1.34" # 미지정 시 최신 버전 AMI 조회 → 클러스터 버전 불일치 오류
 
   ami_type       = "AL2023_x86_64_STANDARD"
   instance_types = ["c5.large"]
@@ -111,7 +109,6 @@ module "eks_managed_node_group_on_spot" {
   cluster_name         = module.eks.cluster_name
   cluster_service_cidr = module.eks.cluster_service_cidr
   subnet_ids           = module.vpc.private_subnets
-  kubernetes_version   = "1.34"
 
   ami_type       = "AL2023_x86_64_STANDARD"
   instance_types = ["c5.large"]

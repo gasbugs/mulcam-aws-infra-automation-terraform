@@ -6,7 +6,7 @@ module "eks" {
 
   # 클러스터 이름과 버전 설정
   name               = local.cluster_name # 로컬에서 정의한 클러스터 이름 사용
-  kubernetes_version = "1.34"             # EKS 클러스터의 버전 설정
+  kubernetes_version = "1.35"             # EKS 클러스터의 버전 설정
 
   endpoint_public_access                   = true # 클러스터의 퍼블릭 엔드포인트 접근을 허용
   enable_cluster_creator_admin_permissions = true # 클러스터 생성자에게 관리 권한 부여

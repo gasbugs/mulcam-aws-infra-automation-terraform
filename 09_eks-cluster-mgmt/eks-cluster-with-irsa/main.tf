@@ -54,7 +54,7 @@ module "eks" {
   version = "21.8.0"
 
   name               = local.cluster_name
-  kubernetes_version = "1.34"
+  kubernetes_version = "1.35"
 
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
@@ -71,7 +71,6 @@ module "eks" {
 
 # -----------------------------------------------------------------------
 # 노드 그룹 1 — EKS 모듈과 분리하여 별도 모듈로 생성
-# kubernetes_version을 명시하지 않으면 최신 버전 AMI를 조회하여 클러스터 버전과 불일치 오류 발생
 # -----------------------------------------------------------------------
 module "eks_managed_node_group_1" {
   source  = "terraform-aws-modules/eks/aws//modules/eks-managed-node-group"
@@ -81,7 +80,6 @@ module "eks_managed_node_group_1" {
   cluster_name         = module.eks.cluster_name
   cluster_service_cidr = module.eks.cluster_service_cidr
   subnet_ids           = module.vpc.private_subnets
-  kubernetes_version   = "1.34" # 미지정 시 최신 버전 AMI 조회 → 클러스터 버전 불일치 오류
 
   ami_type       = "AL2023_x86_64_STANDARD"
   instance_types = ["t3.small"]
@@ -99,7 +97,6 @@ module "eks_managed_node_group_2" {
   cluster_name         = module.eks.cluster_name
   cluster_service_cidr = module.eks.cluster_service_cidr
   subnet_ids           = module.vpc.private_subnets
-  kubernetes_version   = "1.34"
 
   ami_type       = "AL2023_x86_64_STANDARD"
   instance_types = ["t3.small"]

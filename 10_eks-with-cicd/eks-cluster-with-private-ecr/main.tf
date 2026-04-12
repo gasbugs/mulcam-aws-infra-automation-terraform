@@ -63,7 +63,7 @@ module "eks" {
 
   # 클러스터 이름과 버전 설정
   name               = local.cluster_name # 로컬에서 정의한 클러스터 이름 사용
-  kubernetes_version = "1.34"             # EKS 클러스터의 버전 설정 (최신 안정 버전으로 업데이트)
+  kubernetes_version = "1.35"             # EKS 클러스터의 버전 설정 (최신 안정 버전으로 업데이트)
 
   endpoint_public_access                   = false # 클러스터의 퍼블릭 엔드포인트 접근을 허용
   enable_cluster_creator_admin_permissions = true  # 클러스터 생성자에게 관리 권한 부여
@@ -133,7 +133,6 @@ module "eks_managed_node_groups" {
   cluster_name         = module.eks.cluster_name         # EKS 클러스터 이름
   cluster_service_cidr = module.eks.cluster_service_cidr # 클러스터 서비스 CIDR
   subnet_ids           = module.vpc.private_subnets      # 사설 서브넷 ID
-  kubernetes_version   = "1.34"                          # 클러스터 버전과 일치시켜야 AMI 선택 오류 방지
 
   ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
   instance_types = ["c5.large"]             # 노드 인스턴스 유형
