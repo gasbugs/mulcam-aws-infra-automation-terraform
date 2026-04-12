@@ -65,20 +65,27 @@ resource "kubernetes_service_account_v1" "s3_access_sa" {
 }
 
 # S3 접근을 위한 파드 생성
-resource "kubernetes_pod" "s3_access_pod" {
-  metadata {
-    name      = local.pod_name                                     # 파드 이름 설정
-    namespace = kubernetes_namespace_v1.s3-access.metadata[0].name # 네임스페이스 설정
-  }
-  spec {
-    service_account_name = kubernetes_service_account_v1.s3_access_sa.metadata[0].name # 파드가 사용할 서비스 어카운트 설정
-
-    container {
-      name    = "aws-cli-container"   # 컨테이너 이름 설정
-      image   = "gasbugs/aws-cli"     # AWS CLI가 설치된 Docker 이미지 사용
-      command = ["sleep", "infinity"] # 파드가 무한 대기 상태에 있도록 설정
+# kubernetes_manifest 사용: kubernetes provider v3에서 kubernetes_pod_v1이
+# Pending 상태 파드의 identity를 잘못 저장하는 버그가 있어 kubectl_manifest 방식으로 대체
+resource "kubectl_manifest" "s3_access_pod" {
+  yaml_body = yamlencode({
+    apiVersion = "v1"
+    kind       = "Pod"
+    metadata = {
+      name      = local.pod_name
+      namespace = kubernetes_namespace_v1.s3-access.metadata[0].name
     }
-  }
+    spec = {
+      serviceAccountName = kubernetes_service_account_v1.s3_access_sa.metadata[0].name
+      containers = [{
+        name    = "aws-cli-container"
+        image   = "gasbugs/aws-cli"
+        command = ["sleep", "infinity"]
+      }]
+    }
+  })
+
+  depends_on = [kubernetes_service_account_v1.s3_access_sa]
 }
 
 # s3에 접근하는 코드 예제

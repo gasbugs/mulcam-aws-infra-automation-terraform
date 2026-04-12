@@ -23,16 +23,16 @@ provider "aws" {
   profile = "my-profile"   # 인증에 사용할 AWS CLI 프로파일
 }
 
-# Helm 프로바이더 — EKS 클러스터 엔드포인트와 인증 정보를 Terraform이 직접 참조
+# Helm 프로바이더 v3 — kubernetes 속성 할당 방식(= {}) 사용
 # module.eks가 생성된 후 클러스터 정보가 확정되므로 단일 terraform apply로 배포 가능
 provider "helm" {
-  kubernetes {
+  kubernetes = {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
 
     # aws eks get-token으로 임시 Bearer 토큰을 발급받아 Kubernetes API 인증
     # kubeconfig 파일 없이 동작 — CI/CD 환경에서도 사용 가능
-    exec {
+    exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
       args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name,

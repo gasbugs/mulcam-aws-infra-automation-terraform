@@ -1,10 +1,4 @@
-
-provider "helm" {
-  kubernetes = {
-    config_path = "${pathexpand("~")}/.kube/config"
-  }
-}
-
+# Helm으로 Cluster Autoscaler 설치 — exec 방식 프로바이더 인증으로 kubeconfig 불필요
 resource "helm_release" "cluster_autoscaler" {
   name       = "cluster-autoscaler"
   repository = "https://kubernetes.github.io/autoscaler" # https://kubernetes.github.io/autoscaler/index.yaml
@@ -18,10 +12,9 @@ resource "helm_release" "cluster_autoscaler" {
       aws_region   = var.aws_region
     })
   ]
-
-  depends_on = [null_resource.eks_kubectl_config]
 }
 
+# Cluster Autoscaler 서비스 어카운트 — IRSA IAM 역할 ARN을 어노테이션으로 연결
 resource "kubernetes_service_account" "cluster_autoscaler" {
   metadata {
     name      = "cluster-autoscaler"
@@ -30,7 +23,6 @@ resource "kubernetes_service_account" "cluster_autoscaler" {
       "eks.amazonaws.com/role-arn" = module.irsa-cluster-autoscaler.iam_role_arn
     }
   }
-  depends_on = [null_resource.eks_kubectl_config]
 }
 
 # IRSA 모듈 정의 (cluster-autoscaler)

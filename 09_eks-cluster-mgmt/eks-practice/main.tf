@@ -112,6 +112,19 @@ resource "aws_iam_role_policy_attachment" "node_group_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" # SSM 접근 허용
 }
 
+# Karpenter 시스템 노드 그룹용 런치 템플릿 — IMDS hop limit 2 설정
+# Karpenter 파드가 EC2 메타데이터 서비스(IMDS)를 통해 리전 정보를 가져오려면
+# hop limit이 최소 2 이상이어야 함 (기본값 1이면 컨테이너에서 401 오류 발생)
+resource "aws_launch_template" "karpenter_system" {
+  name_prefix = "karpenter-system-"
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"        # IMDSv2 강제
+    http_put_response_hop_limit = 2                 # 파드 → 노드 → IMDS 2홉 허용
+  }
+}
+
 # Karpenter와 EKS Addon을 실행하기 위한 관리형 노드 그룹
 # CriticalAddonsOnly taint를 추가하여 Karpenter가 관리하는 Pod만 이 노드에서 실행되도록 제한
 resource "aws_eks_node_group" "karpenter" {
@@ -122,6 +135,11 @@ resource "aws_eks_node_group" "karpenter" {
 
   ami_type       = "AL2023_x86_64_STANDARD"
   instance_types = ["m5.large"]
+
+  launch_template {
+    id      = aws_launch_template.karpenter_system.id
+    version = aws_launch_template.karpenter_system.latest_version
+  }
 
   scaling_config {
     min_size     = 2
@@ -375,11 +393,10 @@ resource "aws_security_group" "my_efs_sg" {
 
 
 # 각 서브넷(가용 영역)에 대해 EFS 마운트 타겟 생성
+# count 방식 사용 — for_each는 apply-time 서브넷 ID를 키로 쓸 수 없어 plan 단계 오류 발생
 resource "aws_efs_mount_target" "example" {
-  for_each        = toset(module.vpc.private_subnets) # 모든 프라이빗 서브넷에 대해 반복
+  count           = length(module.vpc.private_subnets) # 프라이빗 서브넷 수만큼 반복
   file_system_id  = aws_efs_file_system.example.id
-  subnet_id       = each.value
+  subnet_id       = module.vpc.private_subnets[count.index]
   security_groups = [aws_security_group.my_efs_sg.id]
-
-  depends_on = [module.vpc.private_subnets]
 }
