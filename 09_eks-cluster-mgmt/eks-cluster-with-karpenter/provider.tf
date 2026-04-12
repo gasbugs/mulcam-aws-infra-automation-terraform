@@ -4,7 +4,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
+      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용
     }
     helm = {
       source  = "hashicorp/helm"
@@ -17,29 +17,40 @@ terraform {
   }
 }
 
-
 # AWS 프로바이더 설정
 provider "aws" {
   region  = var.aws_region # 리소스를 배포할 AWS 리전
   profile = "my-profile"   # 인증에 사용할 AWS CLI 프로파일
 }
 
-# AWS CLI로 kubeconfig를 업데이트하여 kubectl이 EKS 클러스터에 접근할 수 있도록 설정
-resource "null_resource" "eks_kubectl_config" {
-  provisioner "local-exec" {
-    # aws eks update-kubeconfig: kubeconfig 파일에 클러스터 접근 정보를 자동 기록
-    command = "aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${var.aws_region} --profile my-profile"
-  }
-
-  depends_on = [module.eks]
-}
-
-provider "kubectl" {
-  load_config_file = true
-}
-
+# Helm 프로바이더 — EKS 클러스터 엔드포인트와 인증 정보를 Terraform이 직접 참조
+# module.eks가 생성된 후 클러스터 정보가 확정되므로 단일 terraform apply로 배포 가능
 provider "helm" {
-  kubernetes = {
-    config_path = "${pathexpand("~")}/.kube/config"
+  kubernetes {
+    host                   = module.eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+
+    # aws eks get-token으로 임시 Bearer 토큰을 발급받아 Kubernetes API 인증
+    # kubeconfig 파일 없이 동작 — CI/CD 환경에서도 사용 가능
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name,
+                     "--region", var.aws_region, "--profile", "my-profile"]
+    }
+  }
+}
+
+# kubectl 프로바이더 — NodeClass, NodePool 등 CRD 리소스 배포용
+provider "kubectl" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  load_config_file       = false # kubeconfig 파일 참조 비활성화
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name,
+                   "--region", var.aws_region, "--profile", "my-profile"]
   }
 }

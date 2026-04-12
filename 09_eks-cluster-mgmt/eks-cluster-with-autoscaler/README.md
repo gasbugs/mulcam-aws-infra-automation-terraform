@@ -8,8 +8,6 @@
 - On-demand와 Spot 두 가지 노드 그룹을 혼합해 비용 효율적으로 클러스터 운영하는 방법
 - Helm을 통해 Cluster Autoscaler를 EKS에 설치하고 IRSA로 권한을 연동하는 방법
 
-> **참고:** 이 프로젝트는 실습 진행 중(_pending)인 버전입니다. 완성된 버전은 `eks-practice`를 참고하세요.
-
 ---
 
 ## 사전 요구 사항
@@ -29,8 +27,8 @@
 [VPC 10.0.0.0/16]
   └── 프라이빗 서브넷 x3
         └── EKS 클러스터 (v1.34)
-              ├── 노드 그룹: on_demand (capacity_type=SPOT, c5.large)
-              └── 노드 그룹: on_spot   (capacity_type=SPOT, c5.large)
+              ├── 노드 그룹: on_demand (ON_DEMAND, c5.large)
+              └── 노드 그룹: on_spot   (SPOT, c5.large)
 
 [Kubernetes 내부]
   └── Cluster Autoscaler (Helm 설치)
@@ -56,24 +54,22 @@
 ### 1단계: 초기화
 
 ```bash
-cd 09_eks-cluster-mgmt/eks-cluster-with-autoscaler_pending
+cd 09_eks-cluster-mgmt/eks-cluster-with-autoscaler
 terraform init
 ```
 
-### 2단계: 1차 배포 — VPC + EKS + 노드 그룹 (약 20분 소요)
+### 2단계: 배포 (약 20~25분 소요)
 
-Helm/Kubernetes 프로바이더는 EKS 클러스터가 준비된 후에 연결할 수 있으므로
-인프라 리소스를 먼저 배포합니다.
+Helm 프로바이더가 `exec` 방식으로 EKS에 직접 인증하므로
+단일 `terraform apply`로 전체 리소스를 한 번에 배포합니다.
 
 ```bash
-terraform apply \
-  -target=module.vpc \
-  -target=module.eks \
-  -target=module.eks_managed_node_group_on_demand \
-  -target=module.eks_managed_node_group_on_spot
+terraform apply
 ```
 
 ### 3단계: kubeconfig 설정
+
+`kubectl`을 직접 사용하려면 kubeconfig를 업데이트합니다.
 
 ```bash
 aws eks update-kubeconfig \
@@ -82,15 +78,7 @@ aws eks update-kubeconfig \
   --profile my-profile
 ```
 
-### 4단계: 2차 배포 — Cluster Autoscaler 설치 (약 2분 소요)
-
-kubeconfig 설정 완료 후 나머지 Kubernetes/Helm 리소스를 배포합니다.
-
-```bash
-terraform apply
-```
-
-### 5단계: Cluster Autoscaler 확인
+### 4단계: Cluster Autoscaler 확인
 
 ```bash
 # Cluster Autoscaler 파드 확인
@@ -102,7 +90,7 @@ kubectl logs -n kube-system \
   --tail=50
 ```
 
-### 6단계: 자동 스케일링 테스트
+### 5단계: 자동 스케일링 테스트
 
 ```bash
 # 부하 발생용 디플로이먼트 생성 (CPU 요청을 명시해야 스케일 아웃 트리거됨)
@@ -134,7 +122,7 @@ EOF
 kubectl get nodes -w
 ```
 
-### 7단계: 리소스 삭제
+### 6단계: 리소스 삭제
 
 ```bash
 # 테스트 리소스 먼저 삭제

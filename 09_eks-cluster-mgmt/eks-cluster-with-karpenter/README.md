@@ -7,7 +7,7 @@
 - `eks-practice`의 완성된 코드를 참고하면서, 빈 구조에 직접 코드를 채워 넣는 실습
 - Karpenter의 각 구성 요소(NodeClass, NodePool, Helm Release)를 직접 작성하면서 이해하는 방법
 
-> **참고:** 이 프로젝트는 `eks-practice`의 실습 버전(_pending)입니다.
+> **참고:** 이 프로젝트는 `eks-practice`의 실습 버전입니다.
 > 완성된 참조 코드는 `eks-practice` 디렉토리를 확인하세요.
 
 ---
@@ -57,28 +57,22 @@
 ### 1단계: 초기화
 
 ```bash
-cd 09_eks-cluster-mgmt/eks-cluster-with-karpenter_pending
+cd 09_eks-cluster-mgmt/eks-cluster-with-karpenter
 terraform init
 ```
 
-### 2단계: 1차 배포 — VPC + EKS + 노드 그룹 (약 20분 소요)
+### 2단계: 배포 (약 20~25분 소요)
 
-Helm/kubectl 프로바이더는 EKS 클러스터가 준비된 후에 연결할 수 있으므로
-인프라 리소스를 먼저 배포합니다.
+Helm/kubectl 프로바이더가 `exec` 방식으로 EKS에 직접 인증하므로
+단일 `terraform apply`로 전체 리소스를 한 번에 배포합니다.
 
 ```bash
-terraform apply \
-  -target=module.vpc \
-  -target=module.eks \
-  -target=aws_iam_role.node_group \
-  -target=aws_iam_role_policy_attachment.node_group_worker \
-  -target=aws_iam_role_policy_attachment.node_group_cni \
-  -target=aws_iam_role_policy_attachment.node_group_ecr \
-  -target=aws_iam_role_policy_attachment.node_group_ssm \
-  -target=aws_eks_node_group.karpenter
+terraform apply
 ```
 
 ### 3단계: kubeconfig 설정
+
+`kubectl`을 직접 사용하려면 kubeconfig를 업데이트합니다.
 
 ```bash
 aws eks update-kubeconfig \
@@ -87,15 +81,7 @@ aws eks update-kubeconfig \
   --profile my-profile
 ```
 
-### 4단계: 2차 배포 — Karpenter 설치 (약 2분 소요)
-
-kubeconfig 설정 완료 후 나머지 Helm/kubectl 리소스를 배포합니다.
-
-```bash
-terraform apply
-```
-
-### 5단계: Karpenter 동작 확인
+### 4단계: Karpenter 동작 확인
 
 ```bash
 # Karpenter 파드 실행 확인 (2개 Running이어야 정상)
@@ -108,7 +94,7 @@ kubectl get ec2nodeclasses
 kubectl get nodepools
 ```
 
-### 6단계: 리소스 삭제
+### 5단계: 리소스 삭제
 
 ```bash
 # Karpenter가 관리하는 노드 먼저 정리 (남아있으면 destroy 중 재생성 시도 가능)

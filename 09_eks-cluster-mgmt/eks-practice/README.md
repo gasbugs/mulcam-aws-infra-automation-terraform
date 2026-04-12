@@ -69,24 +69,18 @@ terraform init
 terraform plan
 ```
 
-### 3단계: 1차 배포 — VPC + EKS + 노드 그룹 (약 20분 소요)
+### 3단계: 배포 (약 25~30분 소요)
 
-Helm/kubectl 프로바이더는 EKS 클러스터가 준비된 후에 연결할 수 있으므로
-인프라 리소스를 먼저 배포합니다.
+Helm/kubectl 프로바이더가 `exec` 방식으로 EKS에 직접 인증하므로
+단일 `terraform apply`로 전체 리소스를 한 번에 배포합니다.
 
 ```bash
-terraform apply \
-  -target=module.vpc \
-  -target=module.eks \
-  -target=aws_iam_role.node_group \
-  -target=aws_iam_role_policy_attachment.node_group_worker \
-  -target=aws_iam_role_policy_attachment.node_group_cni \
-  -target=aws_iam_role_policy_attachment.node_group_ecr \
-  -target=aws_iam_role_policy_attachment.node_group_ssm \
-  -target=aws_eks_node_group.karpenter
+terraform apply
 ```
 
 ### 4단계: kubeconfig 설정
+
+`kubectl`을 직접 사용하려면 kubeconfig를 업데이트합니다.
 
 ```bash
 aws eks update-kubeconfig \
@@ -95,15 +89,7 @@ aws eks update-kubeconfig \
   --profile my-profile
 ```
 
-### 5단계: 2차 배포 — Karpenter + 스토리지 설치 (약 5분 소요)
-
-kubeconfig 설정 완료 후 나머지 Helm/kubectl/IRSA 리소스를 배포합니다.
-
-```bash
-terraform apply
-```
-
-### 6단계: Karpenter 상태 확인
+### 5단계: Karpenter 상태 확인
 
 ```bash
 # Karpenter 파드 확인 (2개 Running이어야 정상)
