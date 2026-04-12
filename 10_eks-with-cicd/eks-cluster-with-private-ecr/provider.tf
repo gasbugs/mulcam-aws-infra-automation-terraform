@@ -1,10 +1,18 @@
-# Terraform 및 AWS 프로바이더 버전 설정
+# Terraform 및 프로바이더 버전 설정
 terraform {
   required_version = ">= 1.13.4" # Terraform 최소 요구 버전
   required_providers {
     aws = {
       source  = "hashicorp/aws" # AWS 프로바이더의 소스 지정
-      version = "~> 6.0"     # 6.x.x 버전 이상의 AWS 프로바이더 사용 이상의 AWS 프로바이더 사용
+      version = "~> 6.0"        # 6.x.x 버전 AWS 프로바이더 사용
+    }
+    tls = {
+      source  = "hashicorp/tls" # SSH 키 페어 자동 생성에 사용되는 TLS 프로바이더
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local" # 개인 키를 로컬 파일로 저장하는 데 사용
+      version = "~> 2.0"
     }
   }
 }

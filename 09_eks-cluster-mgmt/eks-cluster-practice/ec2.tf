@@ -1,6 +1,7 @@
 # SSH 연결을 위한 보안 그룹 생성 (22번 포트 오픈)
+# 이름에 랜덤 문자열을 붙여 재배포 시 이름 충돌을 방지
 resource "aws_security_group" "ssh_sg" {
-  name        = "ssh-access-sg"
+  name        = "ssh-access-sg-${random_string.suffix.result}"
   description = "Allow SSH access"
   vpc_id      = module.vpc.vpc_id # 디폴트 VPC ID 사용
 
@@ -25,10 +26,23 @@ resource "random_integer" "key_name" {
   max = 9999
 }
 
-# AWS 키 페어 생성
+# TLS 프로바이더로 RSA 4096비트 키 쌍을 자동 생성 (외부 키 파일 없이 Terraform이 직접 관리)
+resource "tls_private_key" "ec2_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+# 생성된 공개 키를 AWS에 등록
 resource "aws_key_pair" "ec2_key_pair" {
-  key_name   = "ec2-key-${random_integer.key_name.result}" # 랜덤한 숫자를 포함하는 키 이름 생성
-  public_key = file(var.key_path)                          # 지정된 경로에서 public key 가져오기
+  key_name   = "ec2-key-${random_integer.key_name.result}"    # 랜덤한 숫자를 포함하는 키 이름 생성
+  public_key = tls_private_key.ec2_key.public_key_openssh     # TLS로 생성된 공개 키 사용
+}
+
+# 개인 키를 로컬 파일로 저장 (SSH 접속 시 사용, 권한 0600으로 보안 설정)
+resource "local_file" "private_key" {
+  content         = tls_private_key.ec2_key.private_key_pem
+  filename        = "${path.module}/ec2-key.pem"
+  file_permission = "0600"
 }
 
 data "aws_ami" "al2023" {

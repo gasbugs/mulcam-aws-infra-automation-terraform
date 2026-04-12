@@ -26,7 +26,7 @@ resource "aws_security_group" "ec2_sg" {
 
 module "ec2_instance" {
   source  = "terraform-aws-modules/ec2-instance/aws"
-  version = "5.7.1"
+  version = "~> 6.0" # AWS 프로바이더 v6와 호환되는 최신 버전 (5.x는 cpu_core_count 등 제거된 인수 포함)
 
   name = "al2023-ec2"
 
@@ -73,8 +73,21 @@ resource "random_integer" "key_suffix" {
   max = 9999
 }
 
-# 로컬 경로의 public key 읽기
+# TLS 프로바이더로 RSA 4096비트 키 쌍 자동 생성 (외부 파일 없이 Terraform이 직접 관리)
+resource "tls_private_key" "ec2_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+# 생성된 공개 키를 AWS에 등록
 resource "aws_key_pair" "my_key_pair" {
-  key_name   = "my-key-${random_integer.key_suffix.result}" # 랜덤 인트 포함한 키 이름
-  public_key = file(var.key_path)                           # 지정된 경로에서 public key 읽기
+  key_name   = "my-key-${random_integer.key_suffix.result}"  # 랜덤 인트 포함한 키 이름
+  public_key = tls_private_key.ec2_key.public_key_openssh    # TLS로 생성된 공개 키 사용
+}
+
+# 개인 키를 로컬 파일로 저장 (SSH 접속 시 사용, 권한 0600으로 보안 설정)
+resource "local_file" "private_key" {
+  content         = tls_private_key.ec2_key.private_key_pem
+  filename        = "${path.module}/ec2-key.pem"
+  file_permission = "0600"
 }

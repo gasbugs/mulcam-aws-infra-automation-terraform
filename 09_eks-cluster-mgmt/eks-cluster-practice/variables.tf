@@ -3,7 +3,3 @@ variable "aws_region" {
   type        = string
 }
 
-variable "key_path" {
-  type = string
-}
-
