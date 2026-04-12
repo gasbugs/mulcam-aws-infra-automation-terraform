@@ -69,10 +69,21 @@ terraform init
 terraform plan
 ```
 
-### 3단계: 배포 (약 25~30분 소요)
+### 3단계: 1차 배포 — VPC + EKS + 노드 그룹 (약 20분 소요)
+
+Helm/kubectl 프로바이더는 EKS 클러스터가 준비된 후에 연결할 수 있으므로
+인프라 리소스를 먼저 배포합니다.
 
 ```bash
-terraform apply
+terraform apply \
+  -target=module.vpc \
+  -target=module.eks \
+  -target=aws_iam_role.node_group \
+  -target=aws_iam_role_policy_attachment.node_group_worker \
+  -target=aws_iam_role_policy_attachment.node_group_cni \
+  -target=aws_iam_role_policy_attachment.node_group_ecr \
+  -target=aws_iam_role_policy_attachment.node_group_ssm \
+  -target=aws_eks_node_group.karpenter
 ```
 
 ### 4단계: kubeconfig 설정
@@ -84,11 +95,19 @@ aws eks update-kubeconfig \
   --profile my-profile
 ```
 
-### 5단계: Karpenter 상태 확인
+### 5단계: 2차 배포 — Karpenter + 스토리지 설치 (약 5분 소요)
+
+kubeconfig 설정 완료 후 나머지 Helm/kubectl/IRSA 리소스를 배포합니다.
 
 ```bash
-# Karpenter 파드 확인
-kubectl get pods -n kube-system | grep karpenter
+terraform apply
+```
+
+### 6단계: Karpenter 상태 확인
+
+```bash
+# Karpenter 파드 확인 (2개 Running이어야 정상)
+kubectl get pods -n kube-system -l app.kubernetes.io/name=karpenter
 
 # NodeClass 확인
 kubectl get ec2nodeclasses
@@ -97,7 +116,7 @@ kubectl get ec2nodeclasses
 kubectl get nodepools
 ```
 
-### 6단계: Karpenter 자동 스케일링 테스트
+### 7단계: Karpenter 자동 스케일링 테스트
 
 ```bash
 # 큰 리소스 요청 파드 배포 (새 노드가 자동 생성됨)
@@ -129,11 +148,15 @@ EOF
 kubectl get nodes -w
 ```
 
-### 7단계: 리소스 삭제
+### 8단계: 리소스 삭제
 
 ```bash
-# 배포한 테스트 리소스 먼저 삭제
+# 테스트 리소스 먼저 삭제
 kubectl delete deployment karpenter-test
+
+# Karpenter가 관리하는 노드 정리 (남아있으면 destroy 중 재생성 시도 가능)
+kubectl delete nodeclaims --all
+kubectl delete nodepools --all
 
 terraform destroy
 ```

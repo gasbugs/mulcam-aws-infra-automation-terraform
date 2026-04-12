@@ -56,7 +56,7 @@ The Java Spring Boot example (`05_elb-asg-terraform/packer-for-javaspring/`) has
 | 06 | db-service | RDS MySQL, Aurora, DynamoDB, ElastiCache Redis |
 | 07 | access-control | IAM, KMS, Secrets Manager |
 | 08 | ecs-cluster | ECS, ECR, pull-through cache |
-| 09 | eks-cluster | EKS, node groups (autoscaler/IRSA/Karpenter — `_pending`) |
+| 09 | eks-cluster | EKS, node groups (autoscaler/IRSA/Karpenter/Fargate/Spot) |
 | 10 | eks-with-cicd | EKS + CodePipeline, private ECR |
 | 11 | practical-project | WordPress on EC2 and EKS (end-to-end) |
 
@@ -68,14 +68,6 @@ The Java Spring Boot example (`05_elb-asg-terraform/packer-for-javaspring/`) has
 - **Immutable infrastructure:** Packer bakes AMIs; Terraform deploys them. No in-place EC2 configuration management.
 - **Containerized builds:** Spring Boot apps are compiled inside Docker (`maven:3.9.6-eclipse-temurin-17`) before Packer packaging.
 
-### Pending Projects
-
-Directories with `_pending` suffix in `09_eks-cluster-mgmt/` are under review due to EKS module breaking changes and should not be used without verification:
-- `eks-cluster-with-autoscaler_pending/`
-- `eks-cluster-with-fargate_pending/`
-- `eks-cluster-with-irsa_pending/`
-- `eks-cluster-with-karpenter_pending/`
-- `eks-cluster-with-spot-node-group_pending/`
 
 ## Workshop Management Scripts
 
