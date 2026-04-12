@@ -47,9 +47,27 @@ if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
   exit 0
 fi
 
+# Git Bash에서 user.name/user.email이 없으면 commit이 실패하므로 기본값을 보장
+git config user.email 2>/dev/null | grep -q '@' || \
+  git config user.email "terraform@example.com"
+git config user.name 2>/dev/null | grep -qv '^$' || \
+  git config user.name "Terraform"
+
 # 커밋 후 push
-git commit -m "feat: initial Spring Boot source upload for Image Builder" 2>/dev/null || \
+# 주의: 2>/dev/null 로 에러를 숨기면 Git Bash에서 커밋 실패를 알 수 없어
+#       HEAD가 unborn 상태인 채 push → "src refspec HEAD does not match any" 에러 발생
+#       실제 에러는 출력하되, "nothing to commit" 메시지만 정상 처리
+if git diff --cached --quiet 2>/dev/null && git log -1 2>/dev/null; then
   echo "[INFO] 변경 사항 없음 — 기존 커밋을 push합니다"
+else
+  git commit -m "feat: initial Spring Boot source upload for Image Builder"
+fi
+
+# HEAD가 실제 커밋을 가리키는지 확인 (초기화 직후 커밋 0개이면 push 불가)
+if ! git rev-parse HEAD 2>/dev/null; then
+  echo "오류: 커밋이 없습니다. 'git add' 후 파일이 staging됐는지 확인하세요."
+  exit 1
+fi
 
 git push codecommit HEAD:main
 
