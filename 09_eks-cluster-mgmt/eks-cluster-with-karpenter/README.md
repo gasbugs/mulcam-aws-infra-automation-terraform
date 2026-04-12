@@ -61,10 +61,21 @@ cd 09_eks-cluster-mgmt/eks-cluster-with-karpenter_pending
 terraform init
 ```
 
-### 2단계: 배포
+### 2단계: 1차 배포 — VPC + EKS + 노드 그룹 (약 20분 소요)
+
+Helm/kubectl 프로바이더는 EKS 클러스터가 준비된 후에 연결할 수 있으므로
+인프라 리소스를 먼저 배포합니다.
 
 ```bash
-terraform apply
+terraform apply \
+  -target=module.vpc \
+  -target=module.eks \
+  -target=aws_iam_role.node_group \
+  -target=aws_iam_role_policy_attachment.node_group_worker \
+  -target=aws_iam_role_policy_attachment.node_group_cni \
+  -target=aws_iam_role_policy_attachment.node_group_ecr \
+  -target=aws_iam_role_policy_attachment.node_group_ssm \
+  -target=aws_eks_node_group.karpenter
 ```
 
 ### 3단계: kubeconfig 설정
@@ -76,10 +87,18 @@ aws eks update-kubeconfig \
   --profile my-profile
 ```
 
-### 4단계: Karpenter 동작 확인
+### 4단계: 2차 배포 — Karpenter 설치 (약 2분 소요)
+
+kubeconfig 설정 완료 후 나머지 Helm/kubectl 리소스를 배포합니다.
 
 ```bash
-# Karpenter 파드 실행 확인
+terraform apply
+```
+
+### 5단계: Karpenter 동작 확인
+
+```bash
+# Karpenter 파드 실행 확인 (2개 Running이어야 정상)
 kubectl get pods -n kube-system -l app.kubernetes.io/name=karpenter
 
 # NodeClass 확인
@@ -89,9 +108,13 @@ kubectl get ec2nodeclasses
 kubectl get nodepools
 ```
 
-### 5단계: 리소스 삭제
+### 6단계: 리소스 삭제
 
 ```bash
+# Karpenter가 관리하는 노드 먼저 정리 (남아있으면 destroy 중 재생성 시도 가능)
+kubectl delete nodeclaims --all
+kubectl delete nodepools --all
+
 terraform destroy
 ```
 

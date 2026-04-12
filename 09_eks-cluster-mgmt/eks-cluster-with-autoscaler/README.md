@@ -44,8 +44,8 @@
 | 리소스 | 설명 | 특이사항 |
 |--------|------|---------|
 | EKS 클러스터 (v1.34) | Kubernetes 클러스터 | 퍼블릭 엔드포인트 |
-| 노드 그룹 on_demand | 일반 온디맨드 노드 | Spot 용량 타입, c5.large |
-| 노드 그룹 on_spot | Spot 인스턴스 노드 | 비용 절감용 |
+| 노드 그룹 on_demand | 온디맨드 인스턴스 노드 | 온디맨드 용량 타입, c5.large |
+| 노드 그룹 on_spot | Spot 인스턴스 노드 | 비용 절감용, c5.large |
 | Cluster Autoscaler | 노드 수를 자동으로 늘리고 줄임 | Helm으로 설치, IRSA 연동 |
 | IRSA IAM 역할 | Autoscaler에게 Auto Scaling 권한 부여 | OIDC 신뢰 정책 |
 
@@ -60,10 +60,17 @@ cd 09_eks-cluster-mgmt/eks-cluster-with-autoscaler_pending
 terraform init
 ```
 
-### 2단계: 배포 (약 20~25분 소요)
+### 2단계: 1차 배포 — VPC + EKS + 노드 그룹 (약 20분 소요)
+
+Helm/Kubernetes 프로바이더는 EKS 클러스터가 준비된 후에 연결할 수 있으므로
+인프라 리소스를 먼저 배포합니다.
 
 ```bash
-terraform apply
+terraform apply \
+  -target=module.vpc \
+  -target=module.eks \
+  -target=module.eks_managed_node_group_on_demand \
+  -target=module.eks_managed_node_group_on_spot
 ```
 
 ### 3단계: kubeconfig 설정
@@ -75,7 +82,15 @@ aws eks update-kubeconfig \
   --profile my-profile
 ```
 
-### 4단계: Cluster Autoscaler 확인
+### 4단계: 2차 배포 — Cluster Autoscaler 설치 (약 2분 소요)
+
+kubeconfig 설정 완료 후 나머지 Kubernetes/Helm 리소스를 배포합니다.
+
+```bash
+terraform apply
+```
+
+### 5단계: Cluster Autoscaler 확인
 
 ```bash
 # Cluster Autoscaler 파드 확인
@@ -87,19 +102,44 @@ kubectl logs -n kube-system \
   --tail=50
 ```
 
-### 5단계: 자동 스케일링 테스트
+### 6단계: 자동 스케일링 테스트
 
 ```bash
-# 부하 발생용 디플로이먼트 생성
-kubectl create deployment stress-test --image=nginx --replicas=20
+# 부하 발생용 디플로이먼트 생성 (CPU 요청을 명시해야 스케일 아웃 트리거됨)
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stress-test
+spec:
+  replicas: 20
+  selector:
+    matchLabels:
+      app: stress-test
+  template:
+    metadata:
+      labels:
+        app: stress-test
+    spec:
+      containers:
+      - name: app
+        image: nginx
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "256Mi"
+EOF
 
 # 노드 수 증가 확인 (수 분 내에 새 노드가 추가됨)
 kubectl get nodes -w
 ```
 
-### 6단계: 리소스 삭제
+### 7단계: 리소스 삭제
 
 ```bash
+# 테스트 리소스 먼저 삭제
+kubectl delete deployment stress-test
+
 terraform destroy
 ```
 

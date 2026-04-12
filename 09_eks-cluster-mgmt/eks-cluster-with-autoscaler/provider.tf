@@ -15,10 +15,11 @@ provider "aws" {
   profile = "my-profile"   # 인증에 사용할 AWS CLI 프로파일
 }
 
-# eksctl 명령을 실행하여 kubectl config 설정
+# AWS CLI로 kubeconfig를 업데이트하여 kubectl이 EKS 클러스터에 접근할 수 있도록 설정
 resource "null_resource" "eks_kubectl_config" {
   provisioner "local-exec" {
-    command = "eksctl utils write-kubeconfig --cluster ${module.eks.cluster_name} --region ${var.aws_region}"
+    # aws eks update-kubeconfig: kubeconfig 파일에 클러스터 접근 정보를 자동 기록
+    command = "aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${var.aws_region} --profile my-profile"
   }
 
   depends_on = [module.eks]
