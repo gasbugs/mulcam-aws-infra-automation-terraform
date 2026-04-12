@@ -1,12 +1,35 @@
 # =============================================================================
 # commands/cleaners/storage.py
-# S3, EFS, RDS 스냅샷, Backup 볼트, EC2 Key Pair를 삭제한다.
+# S3, ECR, EFS, RDS 스냅샷, Backup 볼트, EC2 Key Pair를 삭제한다.
 # =============================================================================
 from __future__ import annotations
 
 import time
 
 from botocore.exceptions import BotoCoreError, ClientError
+
+
+def perform_ecr_cleanup(session, log: list, regions: list) -> dict:
+    """ECR 리포지토리를 이미지까지 포함해 삭제한다.
+    force=True 옵션으로 내부 이미지가 있어도 한 번에 제거한다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        try:
+            ecr = session.client("ecr", region_name=region)
+            repos = ecr.describe_repositories().get("repositories", [])
+            for repo in repos:
+                name = repo["repositoryName"]
+                try:
+                    # force=True — 이미지가 남아 있어도 리포지토리째 삭제
+                    ecr.delete_repository(repositoryName=name, force=True)
+                    log.append(f"  [ECR 정리] 리포지토리 삭제 완료: {name} (리전: {region})")
+                    result["deleted"].append(name)
+                except ClientError as e:
+                    log.append(f"  [ECR 정리] 리포지토리 삭제 실패 ({name}): {e}")
+                    result["failed"].append(name)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
 
 
 def perform_rds_snapshot_cleanup(session, log: list, regions: list) -> dict:

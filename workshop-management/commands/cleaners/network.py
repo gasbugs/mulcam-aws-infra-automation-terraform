@@ -92,6 +92,97 @@ def perform_eip_cleanup(session, log: list, regions: list) -> dict:
     return result
 
 
+def perform_sg_cleanup(session, log: list, regions: list) -> dict:
+    """default SG를 제외한 사용자 생성 보안 그룹을 모든 리전에서 삭제한다.
+    SG 간 상호 참조 인그레스·이그레스 규칙을 먼저 제거해야 삭제가 가능하다.
+    EC2·ELB·ECS 등 리소스 정리 후, VPC 삭제 전에 실행해야 한다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        try:
+            ec2 = session.client("ec2", region_name=region)
+            # default SG는 AWS가 자동 생성하므로 삭제 불가 — 탐지 대상에서 제외
+            sgs = [sg for sg in ec2.describe_security_groups().get("SecurityGroups", [])
+                   if sg.get("GroupName") != "default"]
+            if not sgs:
+                continue
+            # 1단계: SG 간 상호 참조 규칙 제거 — A→B, B→A 참조가 남아 있으면 삭제 불가
+            for sg in sgs:
+                sg_id = sg["GroupId"]
+                cross_in  = [r for r in sg.get("IpPermissions",       []) if r.get("UserIdGroupPairs")]
+                cross_out = [r for r in sg.get("IpPermissionsEgress", []) if r.get("UserIdGroupPairs")]
+                if cross_in:
+                    try:
+                        ec2.revoke_security_group_ingress(GroupId=sg_id, IpPermissions=cross_in)
+                    except ClientError:
+                        pass
+                if cross_out:
+                    try:
+                        ec2.revoke_security_group_egress(GroupId=sg_id, IpPermissions=cross_out)
+                    except ClientError:
+                        pass
+            # 2단계: SG 삭제 — 아직 ENI에 연결된 SG는 ClientError로 실패하므로 실패 목록에 기록
+            for sg in sgs:
+                sg_id   = sg["GroupId"]
+                sg_name = sg.get("GroupName", sg_id)
+                try:
+                    ec2.delete_security_group(GroupId=sg_id)
+                    log.append(f"  [SG 정리] 삭제 완료: {sg_name} ({sg_id}, 리전: {region})")
+                    result["deleted"].append(sg_id)
+                except ClientError as e:
+                    log.append(f"  [SG 정리] 삭제 실패 ({sg_name}, {sg_id}, 리전: {region}): {e}")
+                    result["failed"].append(sg_id)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
+def perform_nat_gateway_cleanup(session, log: list, regions: list) -> dict:
+    """VPC와 무관하게 available/pending 상태의 NAT Gateway를 모두 삭제한다.
+    삭제 완료 후 연결된 EIP도 해제한다. VPC 삭제 전에 실행해야 한다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        try:
+            ec2 = session.client("ec2", region_name=region)
+            nat_gws = ec2.describe_nat_gateways(
+                Filters=[{"Name": "state", "Values": ["available", "pending"]}]
+            ).get("NatGateways", [])
+            if not nat_gws:
+                continue
+            nat_ids = [n["NatGatewayId"] for n in nat_gws]
+            # 삭제 요청
+            for nat_id in nat_ids:
+                try:
+                    ec2.delete_nat_gateway(NatGatewayId=nat_id)
+                except ClientError as e:
+                    log.append(f"  [NAT GW 정리] 삭제 요청 실패 ({nat_id}, 리전: {region}): {e}")
+                    result["failed"].append(nat_id)
+            # 삭제 완료까지 대기 (EIP 해제 가능 상태가 되려면 deleted 상태여야 함)
+            try:
+                waiter = ec2.get_waiter("nat_gateway_deleted")
+                waiter.wait(
+                    NatGatewayIds=nat_ids,
+                    WaiterConfig={"Delay": 10, "MaxAttempts": 30},
+                )
+            except Exception:
+                pass  # 타임아웃 시에도 EIP 해제 시도는 계속 진행
+            # 연결됐던 EIP 해제
+            for nat in nat_gws:
+                nat_id = nat["NatGatewayId"]
+                for addr in nat.get("NatGatewayAddresses", []):
+                    alloc_id = addr.get("AllocationId")
+                    if alloc_id:
+                        try:
+                            ec2.release_address(AllocationId=alloc_id)
+                            log.append(f"  [NAT GW 정리] EIP 해제: {alloc_id} (리전: {region})")
+                        except ClientError:
+                            pass
+                log.append(f"  [NAT GW 정리] 삭제 완료: {nat_id} (리전: {region})")
+                result["deleted"].append(nat_id)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
 def perform_vpc_cleanup(session, log: list, regions: list) -> dict:
     """기본(default) VPC를 제외한 모든 VPC를 삭제한다.
     NAT GW → IGW → 엔드포인트 → ENI → 서브넷 → 라우트 테이블 → 보안 그룹 → VPC 순으로 정리한다."""

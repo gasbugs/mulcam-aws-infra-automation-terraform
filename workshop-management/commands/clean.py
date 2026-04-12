@@ -43,10 +43,11 @@ from commands.cleaners.misc import (
 )
 from commands.cleaners.network import (
     perform_cloudfront_cleanup, perform_eip_cleanup,
-    perform_elb_cleanup, perform_route53_cleanup, perform_vpc_cleanup,
+    perform_elb_cleanup, perform_nat_gateway_cleanup,
+    perform_route53_cleanup, perform_sg_cleanup, perform_vpc_cleanup,
 )
 from commands.cleaners.storage import (
-    perform_backup_cleanup, perform_efs_cleanup,
+    perform_backup_cleanup, perform_ecr_cleanup, perform_efs_cleanup,
     perform_keypair_cleanup, perform_rds_snapshot_cleanup, perform_s3_cleanup,
 )
 
@@ -100,6 +101,7 @@ def _save_clean_history(
         "secretsmanager_cleanup", "codebuild_cleanup", "wafv2_cleanup",
         "backup_cleanup", "dynamodb_cleanup", "sns_cleanup", "sqs_cleanup",
         "acm_cleanup", "route53_cleanup", "keypair_cleanup", "kms_cleanup",
+        "nat_gw_cleanup", "sg_cleanup", "ecr_cleanup",
     ]
 
     accounts_log = []
@@ -140,6 +142,29 @@ def _delete_snapshot(credentials_file: str) -> None:
         snap_path.unlink()
 
 
+def _save_residual_snapshot(
+    credentials_file: str,
+    original_snapshot: dict,
+    failed_names: set[str],
+) -> Path:
+    """삭제 실패 계정만 걸러서 잔여 스냅샷으로 저장한다.
+    저장 후 awsw clean 을 재실행하면 실패 계정만 대상으로 재시도할 수 있다."""
+    residual_accounts = [
+        a for a in original_snapshot["accounts"]
+        if a["name"] in failed_names
+    ]
+    snap_path = _get_snapshot_dir(credentials_file) / "audit_snapshot.json"
+    residual = {
+        "created_at":       original_snapshot.get("created_at", "unknown"),
+        "credentials_file": credentials_file,
+        "total_accounts":   len(residual_accounts),
+        "accounts":         residual_accounts,
+    }
+    with snap_path.open("w", encoding="utf-8") as f:
+        json.dump(residual, f, ensure_ascii=False, indent=2)
+    return snap_path
+
+
 # ── 단일 계정 삭제 오케스트레이터 ─────────────────────────────────────────────
 
 def _delete_account(cred: dict) -> None:
@@ -176,7 +201,9 @@ def _delete_account(cred: dict) -> None:
                            "backup_cleanup": {}, "dynamodb_cleanup": {},
                            "sns_cleanup": {}, "sqs_cleanup": {},
                            "acm_cleanup": {}, "route53_cleanup": {},
-                           "keypair_cleanup": {}, "kms_cleanup": {}})
+                           "keypair_cleanup": {}, "kms_cleanup": {},
+                           "nat_gw_cleanup": {}, "sg_cleanup": {},
+                           "ecr_cleanup": {}})
             return
 
     # 감사에서 발견된 리소스 타입만 삭제 — 없는 타입은 API 호출조차 하지 않는다
@@ -191,6 +218,7 @@ def _delete_account(cred: dict) -> None:
         "cw_alarm_cleanup":        _found("CloudWatch Alarms"),
         "cloudwatch_cleanup":      _found("CloudWatch"),
         "ecs_cleanup":             _found("ECS"),
+        "ecr_cleanup":             _found("ECR"),
         "eks_cleanup":             _found("EKS"),
         "asg_cleanup":             _found("AutoScalingGroups"),
         "elb_cleanup":             _found("ELB"),
@@ -218,6 +246,8 @@ def _delete_account(cred: dict) -> None:
         "keypair_cleanup":         _found("Key Pairs"),
         "eip_cleanup":             _found("EIP"),
         "ebs_cleanup":             _found("EBS Volumes"),
+        "sg_cleanup":              _found("Security Groups"),
+        "nat_gw_cleanup":          _found("NAT Gateway"),
         "vpc_cleanup":             _found("VPC"),
         "kms_cleanup":             _found("KMS"),
     }
@@ -231,6 +261,8 @@ def _delete_account(cred: dict) -> None:
         ("cloudwatch_cleanup",      lambda: perform_cloudwatch_cleanup(session, log, regions),       "CloudWatch 로그 그룹 삭제 중"),
         ("ecs_cleanup",             lambda: perform_ecs_full_cleanup(session, log, regions),         "ECS 정리 중"),
         ("eks_cleanup",             lambda: perform_eks_full_cleanup(session, log, regions),         "EKS 정리 중"),
+        # ECR은 ECS·EKS가 이미지를 더 이상 참조하지 않는 상태에서 삭제
+        ("ecr_cleanup",             lambda: perform_ecr_cleanup(session, log, regions),              "ECR 리포지토리 삭제 중"),
         ("asg_cleanup",             lambda: perform_asg_cleanup(session, log, regions),              "ASG 삭제 중"),
         ("elb_cleanup",             lambda: perform_elb_cleanup(session, log, regions),              "ELB 삭제 중"),
         ("rds_cleanup",             lambda: perform_rds_cleanup(session, log, regions),              "RDS 인스턴스/클러스터 삭제 중"),
@@ -258,6 +290,10 @@ def _delete_account(cred: dict) -> None:
         ("keypair_cleanup",         lambda: perform_keypair_cleanup(session, log, regions),          "Key Pair 삭제 중"),
         ("eip_cleanup",             lambda: perform_eip_cleanup(session, log, regions),              "EIP 해제 중"),
         ("ebs_cleanup",             lambda: perform_ebs_volume_cleanup(session, log, regions),       "EBS 볼륨 삭제 중"),
+        # SG는 EC2·ELB·ECS 정리 후, VPC 삭제 전에 실행 — 상호 참조 규칙 제거 후 삭제
+        ("sg_cleanup",              lambda: perform_sg_cleanup(session, log, regions),               "Security Group 삭제 중"),
+        # NAT GW는 VPC 삭제 전에 먼저 제거해야 서브넷이 지워짐 — EIP도 함께 해제
+        ("nat_gw_cleanup",          lambda: perform_nat_gateway_cleanup(session, log, regions),      "NAT Gateway 삭제 중"),
         ("vpc_cleanup",             lambda: perform_vpc_cleanup(session, log, regions),              "VPC 삭제 중"),
         ("kms_cleanup",             lambda: perform_kms_cleanup(session, log, regions),              "KMS 삭제 예약 중"),
     ]
@@ -281,105 +317,156 @@ def _delete_account(cred: dict) -> None:
 # ── 요약 출력 ─────────────────────────────────────────────────────────────────
 
 def _print_delete_summary() -> None:
-    """삭제 단계 결과 요약을 출력한다."""
+    """삭제 단계 결과 요약을 출력한다.
+    성공 항목과 실패 항목을 분리해서 표시하고, 실패는 빨간 글씨로 강조한다."""
     results = get_results()
     def _sum(key, sub): return sum(len(r.get(key, {}).get(sub, [])) for r in results)
 
-    stats = [
-        ("CodePipeline 정리", [("삭제 완료", _sum("codepipeline_cleanup", "deleted")),
-                               ("삭제 실패", _sum("codepipeline_cleanup", "failed"))]),
-        ("Lambda 정리",       [("삭제 완료", _sum("lambda_cleanup",       "deleted")),
-                               ("삭제 실패", _sum("lambda_cleanup",       "failed"))]),
-        ("API Gateway 정리",  [("삭제 완료", _sum("apigateway_cleanup",   "deleted")),
-                               ("삭제 실패", _sum("apigateway_cleanup",   "failed"))]),
-        ("CW 알람 정리",      [("삭제 완료", _sum("cw_alarm_cleanup",     "deleted")),
-                               ("삭제 실패", _sum("cw_alarm_cleanup",     "failed"))]),
-        ("CloudWatch 정리",   [("삭제 완료", _sum("cloudwatch_cleanup",   "deleted")),
-                               ("삭제 실패", _sum("cloudwatch_cleanup",   "failed"))]),
-        ("ECS 정리",          [("삭제 완료", _sum("ecs_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("ecs_cleanup",          "failed"))]),
-        ("EKS 정리",          [("삭제 완료", _sum("eks_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("eks_cleanup",          "failed"))]),
-        ("ASG 정리",          [("삭제 완료", _sum("asg_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("asg_cleanup",          "failed"))]),
-        ("ELB 정리",          [("삭제 완료", _sum("elb_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("elb_cleanup",          "failed"))]),
-        ("RDS 정리",          [("삭제 완료", _sum("rds_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("rds_cleanup",          "failed"))]),
-        ("ElastiCache 정리",  [("삭제 완료", _sum("elasticache_cleanup",  "deleted")),
-                               ("삭제 실패", _sum("elasticache_cleanup",  "failed"))]),
-        ("EFS 정리",          [("삭제 완료", _sum("efs_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("efs_cleanup",          "failed"))]),
-        ("Secrets Manager",   [("삭제 완료", _sum("secretsmanager_cleanup", "deleted")),
-                               ("삭제 실패", _sum("secretsmanager_cleanup", "failed"))]),
-        ("CodeBuild 정리",    [("삭제 완료", _sum("codebuild_cleanup",    "deleted")),
-                               ("삭제 실패", _sum("codebuild_cleanup",    "failed"))]),
-        ("WAFv2 정리",        [("삭제 완료", _sum("wafv2_cleanup",        "deleted")),
-                               ("삭제 실패", _sum("wafv2_cleanup",        "failed"))]),
-        ("Backup 정리",       [("삭제 완료", _sum("backup_cleanup",       "deleted")),
-                               ("삭제 실패", _sum("backup_cleanup",       "failed"))]),
-        ("DynamoDB 정리",     [("삭제 완료", _sum("dynamodb_cleanup",     "deleted")),
-                               ("삭제 실패", _sum("dynamodb_cleanup",     "failed"))]),
-        ("SNS 정리",          [("삭제 완료", _sum("sns_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("sns_cleanup",          "failed"))]),
-        ("SQS 정리",          [("삭제 완료", _sum("sqs_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("sqs_cleanup",          "failed"))]),
-        ("IAM 정리",          [("삭제 완료", _sum("iam_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("iam_cleanup",          "failed"))]),
-        ("ACM 정리",          [("삭제 완료", _sum("acm_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("acm_cleanup",          "failed"))]),
-        ("Image Builder 정리",[("삭제 완료", _sum("imagebuilder_cleanup", "deleted")),
-                               ("삭제 실패", _sum("imagebuilder_cleanup", "failed"))]),
-        ("CodeCommit 정리",   [("삭제 완료", _sum("codecommit_cleanup",   "deleted")),
-                               ("삭제 실패", _sum("codecommit_cleanup",   "failed"))]),
-        ("S3 버킷 정리",      [("삭제 완료", _sum("s3_cleanup",           "deleted")),
-                               ("삭제 실패", _sum("s3_cleanup",           "failed"))]),
-        ("Route53 정리",      [("삭제 완료", _sum("route53_cleanup",      "deleted")),
-                               ("삭제 실패", _sum("route53_cleanup",      "failed"))]),
-        ("EC2 인스턴스",      [("종료 완료", _sum("ec2_cleanup",          "terminated")),
-                               ("종료 실패", _sum("ec2_cleanup",          "failed"))]),
-        ("Key Pair 정리",     [("삭제 완료", _sum("keypair_cleanup",      "deleted")),
-                               ("삭제 실패", _sum("keypair_cleanup",      "failed"))]),
-        ("EIP 정리",          [("해제 완료", _sum("eip_cleanup",          "released")),
-                               ("해제 실패", _sum("eip_cleanup",          "failed"))]),
-        ("EBS 볼륨",          [("삭제 완료", _sum("ebs_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("ebs_cleanup",          "failed"))]),
-        ("AMI 정리",          [("해지 완료", _sum("ami_cleanup",          "deregistered")),
-                               ("해지 실패", _sum("ami_cleanup",          "failed"))]),
-        ("EBS 스냅샷",        [("삭제 완료", _sum("snap_cleanup",         "deleted")),
-                               ("삭제 실패", _sum("snap_cleanup",         "failed"))]),
-        ("RDS 스냅샷",        [("삭제 완료", _sum("rds_snap_cleanup",     "deleted")),
-                               ("삭제 실패", _sum("rds_snap_cleanup",     "failed"))]),
-        ("VPC 정리",          [("삭제 완료", _sum("vpc_cleanup",          "deleted")),
-                               ("삭제 실패", _sum("vpc_cleanup",          "failed"))]),
-        ("KMS 정리",          [("삭제 예약", _sum("kms_cleanup",          "deleted")),
-                               ("예약 실패", _sum("kms_cleanup",          "failed"))]),
-        ("CloudFront",        [("삭제 완료",    _sum("cf_cleanup", "deleted")),
-                               ("비활성화 요청", _sum("cf_cleanup", "disabled")),
-                               ("실패",         _sum("cf_cleanup", "failed")),
-                               ("스킵",         _sum("cf_cleanup", "skipped"))]),
+    # (섹션명, 성공 레이블, 성공 수, 실패 레이블, 실패 수, 참고 [(레이블, 수)])
+    # 성공/실패 레이블은 동사에 맞게 구분 (삭제·종료·해제·해지·예약)
+    SECTIONS = [
+        ("CodePipeline",    "삭제 완료", _sum("codepipeline_cleanup",  "deleted"),
+                            "삭제 실패", _sum("codepipeline_cleanup",  "failed"),   []),
+        ("Lambda",          "삭제 완료", _sum("lambda_cleanup",        "deleted"),
+                            "삭제 실패", _sum("lambda_cleanup",        "failed"),   []),
+        ("API Gateway",     "삭제 완료", _sum("apigateway_cleanup",    "deleted"),
+                            "삭제 실패", _sum("apigateway_cleanup",    "failed"),   []),
+        ("CW 알람",         "삭제 완료", _sum("cw_alarm_cleanup",      "deleted"),
+                            "삭제 실패", _sum("cw_alarm_cleanup",      "failed"),   []),
+        ("CloudWatch",      "삭제 완료", _sum("cloudwatch_cleanup",    "deleted"),
+                            "삭제 실패", _sum("cloudwatch_cleanup",    "failed"),   []),
+        ("ECS",             "삭제 완료", _sum("ecs_cleanup",           "deleted"),
+                            "삭제 실패", _sum("ecs_cleanup",           "failed"),   []),
+        ("EKS",             "삭제 완료", _sum("eks_cleanup",           "deleted"),
+                            "삭제 실패", _sum("eks_cleanup",           "failed"),   []),
+        ("ECR",             "삭제 완료", _sum("ecr_cleanup",           "deleted"),
+                            "삭제 실패", _sum("ecr_cleanup",           "failed"),   []),
+        ("ASG",             "삭제 완료", _sum("asg_cleanup",           "deleted"),
+                            "삭제 실패", _sum("asg_cleanup",           "failed"),   []),
+        ("ELB",             "삭제 완료", _sum("elb_cleanup",           "deleted"),
+                            "삭제 실패", _sum("elb_cleanup",           "failed"),   []),
+        ("RDS",             "삭제 완료", _sum("rds_cleanup",           "deleted"),
+                            "삭제 실패", _sum("rds_cleanup",           "failed"),   []),
+        ("ElastiCache",     "삭제 완료", _sum("elasticache_cleanup",   "deleted"),
+                            "삭제 실패", _sum("elasticache_cleanup",   "failed"),   []),
+        ("EFS",             "삭제 완료", _sum("efs_cleanup",           "deleted"),
+                            "삭제 실패", _sum("efs_cleanup",           "failed"),   []),
+        ("Secrets Manager", "삭제 완료", _sum("secretsmanager_cleanup","deleted"),
+                            "삭제 실패", _sum("secretsmanager_cleanup","failed"),   []),
+        ("CodeBuild",       "삭제 완료", _sum("codebuild_cleanup",     "deleted"),
+                            "삭제 실패", _sum("codebuild_cleanup",     "failed"),   []),
+        ("WAFv2",           "삭제 완료", _sum("wafv2_cleanup",         "deleted"),
+                            "삭제 실패", _sum("wafv2_cleanup",         "failed"),   []),
+        ("Backup",          "삭제 완료", _sum("backup_cleanup",        "deleted"),
+                            "삭제 실패", _sum("backup_cleanup",        "failed"),   []),
+        ("DynamoDB",        "삭제 완료", _sum("dynamodb_cleanup",      "deleted"),
+                            "삭제 실패", _sum("dynamodb_cleanup",      "failed"),   []),
+        ("SNS",             "삭제 완료", _sum("sns_cleanup",           "deleted"),
+                            "삭제 실패", _sum("sns_cleanup",           "failed"),   []),
+        ("SQS",             "삭제 완료", _sum("sqs_cleanup",           "deleted"),
+                            "삭제 실패", _sum("sqs_cleanup",           "failed"),   []),
+        ("IAM",             "삭제 완료", _sum("iam_cleanup",           "deleted"),
+                            "삭제 실패", _sum("iam_cleanup",           "failed"),   []),
+        ("ACM",             "삭제 완료", _sum("acm_cleanup",           "deleted"),
+                            "삭제 실패", _sum("acm_cleanup",           "failed"),   []),
+        ("Image Builder",   "삭제 완료", _sum("imagebuilder_cleanup",  "deleted"),
+                            "삭제 실패", _sum("imagebuilder_cleanup",  "failed"),   []),
+        ("CodeCommit",      "삭제 완료", _sum("codecommit_cleanup",    "deleted"),
+                            "삭제 실패", _sum("codecommit_cleanup",    "failed"),   []),
+        ("S3 버킷",         "삭제 완료", _sum("s3_cleanup",            "deleted"),
+                            "삭제 실패", _sum("s3_cleanup",            "failed"),   []),
+        ("Route53",         "삭제 완료", _sum("route53_cleanup",       "deleted"),
+                            "삭제 실패", _sum("route53_cleanup",       "failed"),   []),
+        ("EC2 인스턴스",    "종료 완료", _sum("ec2_cleanup",           "terminated"),
+                            "종료 실패", _sum("ec2_cleanup",           "failed"),   []),
+        ("Key Pair",        "삭제 완료", _sum("keypair_cleanup",       "deleted"),
+                            "삭제 실패", _sum("keypair_cleanup",       "failed"),   []),
+        ("EIP",             "해제 완료", _sum("eip_cleanup",           "released"),
+                            "해제 실패", _sum("eip_cleanup",           "failed"),   []),
+        ("EBS 볼륨",        "삭제 완료", _sum("ebs_cleanup",           "deleted"),
+                            "삭제 실패", _sum("ebs_cleanup",           "failed"),   []),
+        ("AMI",             "해지 완료", _sum("ami_cleanup",           "deregistered"),
+                            "해지 실패", _sum("ami_cleanup",           "failed"),   []),
+        ("EBS 스냅샷",      "삭제 완료", _sum("snap_cleanup",          "deleted"),
+                            "삭제 실패", _sum("snap_cleanup",          "failed"),   []),
+        ("RDS 스냅샷",      "삭제 완료", _sum("rds_snap_cleanup",      "deleted"),
+                            "삭제 실패", _sum("rds_snap_cleanup",      "failed"),   []),
+        ("Security Group",  "삭제 완료", _sum("sg_cleanup",            "deleted"),
+                            "삭제 실패", _sum("sg_cleanup",            "failed"),   []),
+        ("NAT Gateway",     "삭제 완료", _sum("nat_gw_cleanup",        "deleted"),
+                            "삭제 실패", _sum("nat_gw_cleanup",        "failed"),   []),
+        ("VPC",             "삭제 완료", _sum("vpc_cleanup",           "deleted"),
+                            "삭제 실패", _sum("vpc_cleanup",           "failed"),   []),
+        ("KMS",             "삭제 예약", _sum("kms_cleanup",           "deleted"),
+                            "예약 실패", _sum("kms_cleanup",           "failed"),   []),
+        # CloudFront: 비활성화 요청·스킵은 참고 항목으로 별도 표시
+        ("CloudFront",      "삭제 완료", _sum("cf_cleanup",            "deleted"),
+                            "삭제 실패", _sum("cf_cleanup",            "failed"),
+                            [("비활성화 요청", _sum("cf_cleanup", "disabled")),
+                             ("스킵",          _sum("cf_cleanup", "skipped"))]),
     ]
 
-    lines = ["", "=" * 60, "  [삭제 결과 요약]", "=" * 60]
-    any_action = False
-    for section, items in stats:
-        if any(v for _, v in items):
-            any_action = True
-            lines += [f"  ─────────────────────────────────────", f"  {section} 현황"]
-            for label, val in items:
-                if val:
-                    lines.append(f"    · {label:<14} : {val}개")
+    SEP  = "=" * 60
+    SEP2 = "  " + "─" * 56
 
+    # 성공·실패·참고 행 수집
+    ok_rows   = []  # (섹션명, 레이블, 수)
+    fail_rows = []  # (섹션명, 레이블, 수)
+    info_rows = []  # (섹션명, 레이블, 수) — CloudFront 비활성화 등 참고 항목
+
+    for section, ok_lbl, ok_cnt, fail_lbl, fail_cnt, extras in SECTIONS:
+        if ok_cnt:
+            ok_rows.append((section, ok_lbl, ok_cnt))
+        if fail_cnt:
+            fail_rows.append((section, fail_lbl, fail_cnt))
+        for extra_lbl, extra_cnt in extras:
+            if extra_cnt:
+                info_rows.append((section, extra_lbl, extra_cnt))
+
+    # 출력
+    print(f"\n{SEP}")
+    print("  [삭제 결과 요약]")
+    print(SEP)
+
+    if not ok_rows and not fail_rows and not info_rows:
+        print("  삭제된 리소스 없음")
+        print(SEP)
+        return
+
+    # ── 삭제 완료 블록 ──────────────────────────────────────────────────────────
+    if ok_rows:
+        print(f"\n{SEP2}")
+        print("  ✔  삭제 완료 항목")
+        print(SEP2)
+        for section, lbl, cnt in ok_rows:
+            print(f"    {section:<20} {lbl:<10} : {cnt}개")
+
+    # ── 삭제 실패 블록 (빨간 글씨) ──────────────────────────────────────────────
+    if fail_rows:
+        print(f"\n{SEP2}")
+        print(click.style("  ✘  삭제 실패 항목", fg="red", bold=True))
+        print(SEP2)
+        for section, lbl, cnt in fail_rows:
+            print(click.style(f"    {section:<20} {lbl:<10} : {cnt}개", fg="red"))
+
+    # ── 참고 항목 블록 (CloudFront 비활성화 등) ─────────────────────────────────
+    if info_rows:
+        print(f"\n{SEP2}")
+        print("  ℹ  참고 항목")
+        print(SEP2)
+        for section, lbl, cnt in info_rows:
+            print(f"    {section:<20} {lbl:<10} : {cnt}개")
+
+    # CloudFront 재실행 안내
     cf_disabled = [r for r in results if r.get("cf_cleanup", {}).get("disabled")]
     if cf_disabled:
-        lines += ["", "=" * 60, "  [CloudFront 재실행 필요 — 배포 비활성화만 완료]", "=" * 60]
+        print(f"\n{SEP}")
+        print("  [CloudFront 재실행 필요 — 배포 비활성화만 완료]")
+        print(SEP)
         for r in sorted(cf_disabled, key=account_sort_key):
-            lines.append(f"  {r['name']:<10}  배포 ID: {', '.join(r['cf_cleanup']['disabled'])}")
+            print(f"  {r['name']:<10}  배포 ID: {', '.join(r['cf_cleanup']['disabled'])}")
 
-    if not any_action:
-        lines.append("  삭제된 리소스 없음")
-    lines.append("=" * 60)
-    print("\n".join(lines))
+    print(SEP)
 
 
 # ── click 커맨드 ───────────────────────────────────────────────────────────────
@@ -476,8 +563,28 @@ def cmd(credentials_file, account_filter, yes):
     run_parallel(_delete_account, enriched)
     _print_delete_summary()
 
-    # ── 이력 저장 + 스냅샷 정리 ──────────────────────────────────────────────
-    hist_path = _save_clean_history(credentials_file, snapshot_created_at, get_results())
+    # ── 이력 저장 ────────────────────────────────────────────────────────────
+    clean_results = get_results()
+    hist_path = _save_clean_history(credentials_file, snapshot_created_at, clean_results)
     click.echo(f"\n삭제 이력 저장: {hist_path}")
-    _delete_snapshot(credentials_file)
-    click.echo("스냅샷 파일 삭제 완료.")
+
+    # ── 스냅샷 처리: 실패 계정은 잔여 스냅샷으로 보존, 전부 성공 시 삭제 ────────
+    failed_names = {
+        r["name"] for r in clean_results
+        if any(bool(v.get("failed")) for v in r.values() if isinstance(v, dict))
+    }
+    if failed_names:
+        residual_path = _save_residual_snapshot(credentials_file, snapshot, failed_names)
+        click.echo(click.style(
+            f"\n[경고] {len(failed_names)}개 계정에 삭제 실패 항목이 남아 있습니다: "
+            f"{', '.join(sorted(failed_names))}",
+            fg="red", bold=True,
+        ))
+        click.echo(click.style(
+            f"잔여 스냅샷 보존: {residual_path}\n"
+            f"awsw clean 을 다시 실행하면 실패 항목만 재시도합니다.",
+            fg="yellow",
+        ))
+    else:
+        _delete_snapshot(credentials_file)
+        click.echo("스냅샷 파일 삭제 완료.")

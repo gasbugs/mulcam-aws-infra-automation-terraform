@@ -11,12 +11,16 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 
 def kms_is_disabled_customer_key(client, key_id: str) -> bool:
-    """고객 관리형(CUSTOMER) KMS 키이면서 Disabled 상태인지 확인한다.
-    AWS 관리형 키는 삭제 대상에서 제외하기 위해 KeyManager를 함께 검사한다.
-    audit.py와 misc.py 두 곳에서 사용하므로 공개 함수로 정의한다."""
+    """고객 관리형(CUSTOMER) KMS 키이면서 삭제 대상 상태(Enabled 또는 Disabled)인지 확인한다.
+    - AWS 관리형 키(KeyManager != CUSTOMER)는 제외한다.
+    - 이미 삭제 예약된 키(PendingDeletion)는 중복 예약 오류를 방지하기 위해 제외한다.
+    - audit.py와 misc.py 두 곳에서 사용하므로 공개 함수로 정의한다."""
     try:
         meta = client.describe_key(KeyId=key_id).get("KeyMetadata", {})
-        return meta.get("KeyManager") == "CUSTOMER" and meta.get("KeyState") == "Disabled"
+        return (
+            meta.get("KeyManager") == "CUSTOMER"
+            and meta.get("KeyState") in ("Enabled", "Disabled")
+        )
     except ClientError:
         return False
 
@@ -321,7 +325,8 @@ def perform_secretsmanager_cleanup(session, log: list, regions: list) -> dict:
 
 
 def perform_kms_cleanup(session, log: list, regions: list) -> dict:
-    """비활성화된 고객 관리형 KMS 키의 삭제를 예약한다 (7일 후 삭제)."""
+    """Enabled 또는 Disabled 상태의 고객 관리형 KMS 키의 삭제를 예약한다 (7일 후 삭제).
+    AWS KMS는 즉시 삭제를 지원하지 않으며 최소 7일 대기 후 자동 삭제된다."""
     result: dict = {"deleted": [], "failed": []}
     for region in regions:
         try:

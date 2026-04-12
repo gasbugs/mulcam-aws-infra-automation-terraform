@@ -38,7 +38,7 @@ RESOURCE_CHECKS = {
     "EBS Volumes":            ("ec2",             "regional", "describe_volumes",              "Volumes"),
     "EIP":                    ("ec2",             "regional", "describe_addresses",            "Addresses"),
     "AutoScalingGroups":      ("autoscaling",     "regional", "describe_auto_scaling_groups",  "AutoScalingGroups"),
-    "KMS Keys (Disabled CMK)":("kms",             "regional", "list_keys",                     "Keys"),
+    "KMS Keys (CMK)":         ("kms",             "regional", "list_keys",                     "Keys"),
     "ELB (v1)":               ("elb",             "regional", "describe_load_balancers",       "LoadBalancerDescriptions"),
     "ELB (v2)":               ("elbv2",           "regional", "describe_load_balancers",       "LoadBalancers"),
     "EKS Clusters":           ("eks",             "regional", "list_clusters",                 "clusters"),
@@ -79,6 +79,10 @@ RESOURCE_CHECKS = {
     "SNS Topics":                  ("sns",          "regional", "list_topics",                                  "Topics"),
     "SQS Queues":                  ("sqs",          "regional", "list_queues",                                  "QueueUrls"),
     "Backup Vaults":               ("backup",       "regional", "list_backup_vaults",                           "BackupVaultList"),
+    # NAT Gateway — 시간당 약 $0.045 과금, 잔여 시 비용 발생 주의
+    "NAT Gateways":                ("ec2",          "regional", "describe_nat_gateways",                        "NatGateways"),
+    # Security Groups — default SG를 제외한 사용자 생성 SG 탐지
+    "Security Groups":             ("ec2",          "regional", "describe_security_groups",                     "SecurityGroups"),
 }
 
 
@@ -105,11 +109,12 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
                 parts = ([f"활성화 {enabled}개"] if enabled else []) + ([f"비활성화 {disabled}개"] if disabled else [])
                 return f"CloudFront 리소스 {len(all_dists)}개 발견 (글로벌) — {', '.join(parts)}"
 
-        elif resource_name == "KMS Keys (Disabled CMK)":
+        elif resource_name == "KMS Keys (CMK)":
             keys = client.list_keys().get(result_key, [])
-            disabled = [k for k in keys if kms_is_disabled_customer_key(client, k["KeyId"])]
-            if disabled:
-                return f"{resource_name} 리소스 {len(disabled)}개 발견 (리전: {region})"
+            # Enabled·Disabled 상태의 고객 관리형 키를 탐지 (PendingDeletion은 이미 처리 중이므로 제외)
+            target_keys = [k for k in keys if kms_is_disabled_customer_key(client, k["KeyId"])]
+            if target_keys:
+                return f"{resource_name} 리소스 {len(target_keys)}개 발견 (리전: {region})"
 
         elif resource_name == "WAFv2 ACLs (Global)":
             resources = client.list_web_acls(Scope="CLOUDFRONT").get(result_key, [])
@@ -252,6 +257,25 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
             if topics:
                 names = [t["TopicArn"].rsplit(":", 1)[-1] for t in topics]
                 return f"{resource_name} {len(topics)}개 발견 (리전: {region}) → {', '.join(names)}"
+
+        elif resource_name == "NAT Gateways":
+            # available·pending 상태만 집계 — deleted·deleting은 이미 정리 중이므로 제외
+            nat_gws = client.describe_nat_gateways(
+                Filters=[{"Name": "state", "Values": ["available", "pending"]}]
+            ).get(result_key, [])
+            if nat_gws:
+                ids = [n["NatGatewayId"] for n in nat_gws]
+                return (f"[비용주의] {resource_name} {len(nat_gws)}개 발견 (리전: {region})"
+                        f" → {', '.join(ids)}")
+
+        elif resource_name == "Security Groups":
+            # "default" 이름의 SG는 VPC 기본 제공 항목이므로 탐지 제외
+            sgs = [sg for sg in client.describe_security_groups().get(result_key, [])
+                   if sg.get("GroupName") != "default"]
+            if sgs:
+                names = [sg.get("GroupName", sg["GroupId"]) for sg in sgs]
+                return (f"{resource_name} {len(sgs)}개 발견 (리전: {region})"
+                        f" → {', '.join(names)}")
 
         else:
             resources = getattr(client, api_call)().get(result_key, [])
