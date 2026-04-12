@@ -41,12 +41,20 @@ resource "aws_codecommit_repository" "flask_example_apps" {
 
 ###################################################################
 # CodePipeline에 사용될 IAM 역할 정의
-# CodeBuild, CodePipeline, EventBridge가 이 역할을 맡아서(assume) 동작
+# IAM 역할(Role): AWS 서비스가 다른 서비스를 사용할 때 필요한 "권한 증명서"
+# CodeBuild(빌드), CodePipeline(파이프라인 실행), EventBridge(자동 트리거) 세 서비스가
+# 이 하나의 역할을 공유해서 S3·ECR·CodeCommit 등에 접근함
 resource "aws_iam_role" "code_pipeline_role" {
   name        = "${local.name}-${random_integer.unique_id.result}"
   description = "Role to be used by CodePipeline"
   tags        = local.tags
 
+  # assume_role_policy: 이 역할을 "위임받을 수 있는" 서비스 목록
+  # sts:AssumeRole = "이 역할의 권한을 내가 대신 행사하겠다"는 요청
+  # Principal 서비스 목록:
+  #   - codebuild.amazonaws.com    : Docker 이미지 빌드 서비스
+  #   - codepipeline.amazonaws.com : CI/CD 파이프라인 오케스트레이션 서비스
+  #   - events.amazonaws.com       : EventBridge — CodeCommit push 감지 후 파이프라인 트리거
   assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -70,6 +78,7 @@ EOF
 
 # CodePipeline에서 사용할 사용자 정의 정책
 # GitHub 연결(codestar-connections) 대신 CodeCommit 권한으로 교체
+# 각 Sid(Statement ID)는 역할이 접근할 수 있는 AWS 서비스 범위를 구분
 resource "aws_iam_policy" "this" {
   name        = local.name
   description = "Custom policies for CI/CD pipeline with CodeCommit"
@@ -224,6 +233,8 @@ resource "aws_codebuild_project" "this_ci" {
     }
   }
 
+  # vpc_config: CodeBuild가 VPC 프라이빗 서브넷에서 실행되도록 설정
+  # → ECR, CodeCommit 등 VPC 엔드포인트 또는 NAT 게이트웨이를 통해 접근
   vpc_config {
     vpc_id = module.vpc.vpc_id
 
@@ -250,21 +261,23 @@ resource "aws_codebuild_project" "this_ci" {
 # CodeBuild가 VPC 내부에서 실행되기 위한 보안 그룹
 resource "aws_security_group" "codebuild_sg" {
   name        = "codebuild-security-group-${local.time_static}"
-  description = "Security group for CodeBuild — VPC 내 빌드 실행용"
+  description = "Security group for CodeBuild in VPC"
   vpc_id      = module.vpc.vpc_id
 
   ingress {
     from_port = 0
     to_port   = 0
     protocol  = "-1"
-    self      = true # 같은 보안 그룹 내 트래픽만 허용
+    # self = true: 같은 보안 그룹에 속한 리소스끼리만 내부 통신 허용
+    # (외부 인터넷이나 다른 서브넷에서 들어오는 인바운드 트래픽은 차단)
+    self      = true
   }
 
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"] # ECR, S3 등 외부 서비스 접근 허용
+    cidr_blocks = ["0.0.0.0/0"] # ECR push, S3 업로드, CodeCommit pull 등 외부 서비스 접근 허용
   }
 
   tags = {

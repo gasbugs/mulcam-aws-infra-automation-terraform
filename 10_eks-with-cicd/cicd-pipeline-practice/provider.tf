@@ -18,6 +18,10 @@ terraform {
       source  = "hashicorp/tls"
       version = ">= 4.0" # ArgoCD CodeCommit SSH 키 자동 생성용
     }
+    kubectl = {
+      source  = "alekc/kubectl"
+      version = ">= 2.0" # ArgoCD Application CRD 배포용 (plan 단계 클러스터 연결 불필요)
+    }
   }
 }
 
@@ -27,25 +31,21 @@ provider "aws" {
   profile = "my-profile"
 }
 
-# EKS kubeconfig 자동 설정 — ArgoCD Helm 설치 전에 kubeconfig 준비
-resource "null_resource" "eks_kubectl_config" {
-  provisioner "local-exec" {
-    command = "eksctl utils write-kubeconfig --cluster ${module.eks.cluster_name} --region ${var.aws_region}"
-  }
-
-  depends_on = [time_sleep.wait_for_eks]
-}
-
-resource "time_sleep" "wait_for_eks" {
-  depends_on = [module.eks]
-
-  create_duration = "60s"
-}
-
-# Helm 프로바이더 — ArgoCD 설치에 사용
+# Helm 프로바이더 v3 — kubernetes 속성 할당 방식(= {}) + exec 인증
+# module.eks가 생성된 후 클러스터 정보가 확정되므로 단일 terraform apply로 배포 가능
 provider "helm" {
   kubernetes = {
-    config_path = "${pathexpand("~")}/.kube/config"
+    host                   = module.eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+
+    # aws eks get-token으로 임시 Bearer 토큰을 발급받아 Kubernetes API 인증
+    # kubeconfig 파일 없이 동작 — CI/CD 환경에서도 사용 가능
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name,
+                     "--region", var.aws_region, "--profile", "my-profile"]
+    }
   }
 }
 
@@ -53,14 +53,26 @@ provider "helm" {
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args = [
-      "eks", "get-token",
-      "--cluster-name", module.eks.cluster_name,
-      "--region", var.aws_region,
-      "--profile", "my-profile"
-    ]
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name,
+                   "--region", var.aws_region, "--profile", "my-profile"]
+  }
+}
+
+# kubectl 프로바이더 — ArgoCD Application CRD 배포용
+# kubernetes_manifest와 달리 plan 단계에서 클러스터 연결을 시도하지 않음
+provider "kubectl" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  load_config_file       = false
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name,
+                   "--region", var.aws_region, "--profile", "my-profile"]
   }
 }
