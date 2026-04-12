@@ -18,7 +18,7 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "6.5.0"
 
-  name = "education-vpc"
+  name = "education-vpc-${random_string.suffix.result}" # VPC 이름에 랜덤 문자열을 붙여 중복 방지
   cidr = "10.0.0.0/16"
   azs  = slice(data.aws_availability_zones.available.names, 0, 3)
 
@@ -89,7 +89,7 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
 resource "aws_eks_cluster" "main" {
   name     = local.cluster_name
   role_arn = aws_iam_role.eks_cluster.arn
-  version  = "1.31"
+  version  = "1.34" # 최신 안정 버전으로 업데이트 (1.31 → 1.34)
 
   vpc_config {
     subnet_ids              = module.vpc.private_subnets
@@ -175,44 +175,4 @@ resource "aws_eks_node_group" "node_group_2" {
   ]
 }
 
-resource "aws_eks_addon" "ebs_csi" {
-  cluster_name = aws_eks_cluster.main.name
-  addon_name   = "aws-ebs-csi-driver"
-
-  service_account_role_arn = aws_iam_role.ebs_csi.arn
-}
-
-
-data "aws_iam_policy" "ebs_csi_policy" {
-  arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-}
-
-resource "aws_iam_role" "ebs_csi" {
-  name = "AmazonEKSTFEBSCSIRole-${aws_eks_cluster.main.name}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${replace(aws_eks_cluster.main.identity[0].oidc[0].issuer, "https://", "")}"
-        }
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Condition = {
-          StringEquals = {
-            "${replace(aws_eks_cluster.main.identity[0].oidc[0].issuer, "https://", "")}:sub" : "system:serviceaccount:kube-system:ebs-csi-controller-sa"
-          }
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ebs_csi_policy_attachment" {
-  policy_arn = data.aws_iam_policy.ebs_csi_policy.arn
-  role       = aws_iam_role.ebs_csi.name
-}
-
-data "aws_caller_identity" "current" {}
 

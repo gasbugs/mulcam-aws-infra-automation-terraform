@@ -30,60 +30,29 @@ locals {
 ################################################################################
 
 module "eks" {
-  source = "terraform-aws-modules/eks/aws"
+  source  = "terraform-aws-modules/eks/aws"
+  version = "21.8.0" # 버전 핀 추가 (재현 가능한 빌드를 위해 항상 버전 고정 권장)
 
   name               = local.name
-  kubernetes_version = "1.33"
+  kubernetes_version = "1.34" # 최신 안정 버전으로 업데이트
 
   # Gives Terraform identity admin access to cluster which will
   # allow deploying resources (Karpenter) into the cluster
   enable_cluster_creator_admin_permissions = true
   endpoint_public_access                   = true
 
+  # DaemonSet 기반 애드온만 모듈 내에서 설치 (노드 없이도 ACTIVE 전환)
+  # coredns, aws-ebs-csi-driver, aws-efs-csi-driver는 Deployment 기반이므로
+  # 노드그룹 생성 이후에 별도 리소스로 설치
   addons = {
-    coredns                = {}
-    eks-pod-identity-agent = {}
-    kube-proxy             = {}
-    vpc-cni                = {}
-
-    # Amazon EBS CSI Driver
-    aws-ebs-csi-driver = {
-      #version                  = "v1.3.0"
-      update_policy            = "OVERWRITE"
-      service_account_role_arn = module.irsa-ebs-csi.iam_role_arn # IRSA 역할 추가
-    }
-
-    # Amazon EFS CSI Driver
-    aws-efs-csi-driver = {
-      update_policy            = "OVERWRITE"
-      service_account_role_arn = module.irsa-efs-csi.iam_role_arn # IRSA 역할 추가
-    }
+    eks-pod-identity-agent = {} # EKS Pod Identity 에이전트 (DaemonSet)
+    kube-proxy             = {} # 노드 간 네트워크 규칙 관리 (DaemonSet)
+    vpc-cni                = {} # 노드 네트워크에 반드시 필요한 CNI 플러그인 (DaemonSet)
   }
 
   vpc_id                   = module.vpc.vpc_id
   subnet_ids               = module.vpc.private_subnets
   control_plane_subnet_ids = module.vpc.intra_subnets
-
-  eks_managed_node_groups = {
-    karpenter = {
-      ami_type       = "AL2023_x86_64_STANDARD"
-      instance_types = ["m5.large"]
-
-      min_size     = 2
-      max_size     = 3
-      desired_size = 2
-
-      taints = {
-        # This Taint aims to keep just EKS Addons and Karpenter running on this MNG
-        # The pods that do not tolerate this taint should run on nodes created by Karpenter
-        addons = {
-          key    = "CriticalAddonsOnly"
-          value  = "true"
-          effect = "NO_SCHEDULE"
-        }
-      }
-    }
-  }
 
   # cluster_tags = merge(local.tags, {
   #   NOTE - only use this option if you are using "attach_cluster_primary_security_group"
@@ -101,6 +70,123 @@ module "eks" {
   tags = local.tags
 }
 
+
+################################################################################
+# 노드 그룹 — module.eks 완료 후 생성 (DaemonSet 애드온 설치 후 노드 기동)
+# Karpenter가 관리하는 노드와 달리, 이 노드 그룹은 EKS Addon과 Karpenter 자체를 실행
+################################################################################
+
+# 노드 그룹용 IAM 역할 (EC2 인스턴스가 EKS 노드로 동작하기 위해 필요)
+resource "aws_iam_role" "node_group" {
+  name = "eks-node-group-role-${local.name}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "node_group_worker" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "node_group_cni" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+resource "aws_iam_role_policy_attachment" "node_group_ecr" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy_attachment" "node_group_ssm" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" # SSM 접근 허용
+}
+
+# Karpenter와 EKS Addon을 실행하기 위한 관리형 노드 그룹
+# CriticalAddonsOnly taint를 추가하여 Karpenter가 관리하는 Pod만 이 노드에서 실행되도록 제한
+resource "aws_eks_node_group" "karpenter" {
+  cluster_name    = module.eks.cluster_name
+  node_group_name = "karpenter"
+  node_role_arn   = aws_iam_role.node_group.arn
+  subnet_ids      = module.vpc.private_subnets
+
+  ami_type       = "AL2023_x86_64_STANDARD"
+  instance_types = ["m5.large"]
+
+  scaling_config {
+    min_size     = 2
+    max_size     = 3
+    desired_size = 2
+  }
+
+  taint {
+    # EKS Addon과 Karpenter만 이 노드에서 실행되도록 taint 설정
+    key    = "CriticalAddonsOnly"
+    value  = "true"
+    effect = "NO_SCHEDULE"
+  }
+
+  labels = {
+    "karpenter.sh/discovery" = local.name
+  }
+
+  tags = local.tags
+
+  depends_on = [
+    aws_iam_role_policy_attachment.node_group_worker,
+    aws_iam_role_policy_attachment.node_group_cni,
+    aws_iam_role_policy_attachment.node_group_ecr,
+    aws_iam_role_policy_attachment.node_group_ssm,
+    module.eks,
+  ]
+}
+
+# -----------------------------------------------------------------------
+# 노드 의존 애드온 — 노드그룹 생성 완료 후 설치
+# Deployment 기반이라 노드가 있어야 pod가 스케줄되어 ACTIVE 전환
+# -----------------------------------------------------------------------
+
+# 클러스터 내부 DNS 서비스 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "coredns" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "coredns"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.karpenter]
+}
+
+# EBS 볼륨을 Kubernetes PV로 사용하기 위한 드라이버 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "ebs_csi_driver" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "aws-ebs-csi-driver"
+  service_account_role_arn    = module.irsa-ebs-csi.iam_role_arn
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.karpenter]
+}
+
+# EFS 볼륨을 Kubernetes PV로 사용하기 위한 드라이버 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "efs_csi_driver" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "aws-efs-csi-driver"
+  service_account_role_arn    = module.irsa-efs-csi.iam_role_arn
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.karpenter]
+}
 
 ################################################################################
 # Karpenter
@@ -159,7 +245,8 @@ resource "helm_release" "karpenter" {
 
 # EKS에서 추천되는 AMI 검색 
 data "aws_ssm_parameter" "eks_ami" {
-  name = "/aws/service/eks/optimized-ami/1.31/amazon-linux-2023/x86_64/standard/recommended/image_id"
+  # kubernetes_version과 동일한 버전의 EKS 최적화 AMI ID를 SSM Parameter Store에서 동적으로 조회
+  name = "/aws/service/eks/optimized-ami/1.34/amazon-linux-2023/x86_64/standard/recommended/image_id"
 }
 
 resource "kubectl_manifest" "karpenter_node_class" {

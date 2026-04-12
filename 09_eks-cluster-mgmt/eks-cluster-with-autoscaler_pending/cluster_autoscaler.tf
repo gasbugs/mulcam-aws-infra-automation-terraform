@@ -46,7 +46,8 @@ module "irsa-cluster-autoscaler" {
 }
 
 resource "aws_iam_policy" "cluster_autoscaler_policy" {
-  name        = "ClusterAutoscalerPolicy"
+  # IAM 정책 이름은 계정 전역 고유해야 하므로 클러스터 이름을 붙여 중복 방지
+  name        = "ClusterAutoscalerPolicy-${module.eks.cluster_name}"
   description = "Policy for cluster-autoscaler to interact with AWS Auto Scaling and EC2"
   policy = jsonencode({
     Version = "2012-10-17",

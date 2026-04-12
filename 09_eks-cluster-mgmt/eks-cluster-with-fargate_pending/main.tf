@@ -1,9 +1,7 @@
 # HashiCorp에서 제공하는 예시 코드, MPL-2.0 라이선스에 따라 배포됨
-# 이 코드는 EKS 클러스터를 프로비저닝하기 위한 기본 설정을 포함
-# 원본은 HashiCorp GitHub에서 확인 가능: https://github.com/hashicorp/learn-terraform-provision-eks-cluster/blob/main/main.tf
+# 이 코드는 EKS 클러스터 + Fargate 프로파일 구성을 포함
 
-# AWS의 사용 가능한 가용 영역 중에서 관리형 노드 그룹에 지원되지 않는 Local Zone을 필터링
-# 'opt-in-not-required' 상태인 가용 영역만 선택하여 사용
+# AWS의 사용 가능한 가용 영역 중에서 Local Zone을 필터링
 data "aws_availability_zones" "available" {
   filter {
     name   = "opt-in-status"
@@ -11,23 +9,22 @@ data "aws_availability_zones" "available" {
   }
 }
 
-# 로컬 변수 선언. 클러스터 이름에 무작위 문자열을 추가하여 고유성을 보장
+# 클러스터 이름에 무작위 문자열 추가 (이름 충돌 방지)
 locals {
   cluster_name = "education-eks-${random_string.suffix.result}"
 }
 
-# 8자리 길이의 무작위 문자열을 생성하는 리소스. 특수 문자는 포함하지 않음
 resource "random_string" "suffix" {
   length  = 8
   special = false
 }
 
-# VPC 생성 모듈을 정의. Terraform의 VPC 모듈을 사용해 VPC를 프로비저닝
+# VPC 생성 모듈
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "6.5.0"
 
-  name = "education-vpc"
+  name = "education-vpc-${random_string.suffix.result}"
 
   cidr = "10.0.0.0/16"
   azs  = slice(data.aws_availability_zones.available.names, 0, 3)
@@ -48,52 +45,87 @@ module "vpc" {
   }
 }
 
-# EKS 클러스터 생성 모듈을 정의. Terraform의 EKS 모듈을 사용
+# EKS 클러스터 모듈
+# addons 블록: DaemonSet 기반만 배치 (노드 없이도 ACTIVE 전환 가능)
+# Fargate는 EC2 노드 없이 파드를 실행하지만, coredns/ebs-csi는 Deployment이므로
+# EC2 관리형 노드가 있어야 ACTIVE 상태가 됨
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "20.26.0"
+  version = "21.8.0"
 
-  cluster_name    = local.cluster_name
-  cluster_version = "1.33"
+  name               = local.cluster_name
+  kubernetes_version = "1.34"
 
-  cluster_endpoint_public_access           = true
+  endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
 
-  # 클러스터에 설치할 Top 10 Addons 추가
-  cluster_addons = {
-    aws-ebs-csi-driver = {
-      service_account_role_arn = module.irsa-ebs-csi.iam_role_arn
-    }
+  # DaemonSet 기반 애드온 — 노드 없이도 ACTIVE 전환 가능
+  addons = {
+    vpc-cni    = { update_policy = "OVERWRITE" } # 파드에 VPC IP 직접 할당 (DaemonSet)
+    kube-proxy = { update_policy = "OVERWRITE" } # 노드 간 네트워크 규칙 관리 (DaemonSet)
   }
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
+}
 
-  eks_managed_node_group_defaults = {
-    ami_type = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
-  }
+# -----------------------------------------------------------------------
+# EC2 관리형 노드 그룹 — EKS 모듈과 분리하여 별도 모듈로 생성
+# Fargate 파드가 스케줄되지 않는 시스템 컴포넌트(coredns 등)를 위한 노드
+# kubernetes_version 명시 필수 — 미지정 시 최신 버전 AMI → 버전 불일치 오류
+# -----------------------------------------------------------------------
+module "eks_managed_node_group" {
+  source  = "terraform-aws-modules/eks/aws//modules/eks-managed-node-group"
+  version = "21.8"
 
-  eks_managed_node_groups = {
-    on_demand = {
-      desired_capacity = 1
-      max_capacity     = 4
-      min_capacity     = 1
+  name                 = "on_demand"
+  cluster_name         = module.eks.cluster_name
+  cluster_service_cidr = module.eks.cluster_service_cidr
+  subnet_ids           = module.vpc.private_subnets
+  kubernetes_version   = "1.34" # 미지정 시 최신 버전 AMI 조회 → 클러스터 버전 불일치 오류
 
-      instance_type = "c5.large"
-      labels = {
-        type = "on-demand"
-      }
-    }
+  ami_type       = "AL2023_x86_64_STANDARD"
+  instance_types = ["c5.large"]
+  min_size       = 1
+  max_size       = 4
+  desired_size   = 1
+
+  labels = {
+    type = "on-demand"
   }
 }
 
+# -----------------------------------------------------------------------
+# 노드 의존 애드온 — 노드그룹 완료 후 설치 (Deployment 기반 → 노드 필요)
+# -----------------------------------------------------------------------
 
-# EBS CSI 드라이버 정책을 불러옴
+# 클러스터 내부 DNS (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "coredns" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "coredns"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [module.eks_managed_node_group]
+}
+
+# EBS CSI 드라이버 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "ebs_csi_driver" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "aws-ebs-csi-driver"
+  resolve_conflicts_on_update = "OVERWRITE"
+  service_account_role_arn    = module.irsa-ebs-csi.iam_role_arn
+
+  depends_on = [module.eks_managed_node_group]
+}
+
+# -----------------------------------------------------------------------
+# IRSA — EBS CSI 드라이버용 IAM 역할
+# -----------------------------------------------------------------------
+
 data "aws_iam_policy" "ebs_csi_policy" {
   arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 }
 
-# IRSA 모듈 정의 (EBS CSI)
 module "irsa-ebs-csi" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
   version = "4.20"

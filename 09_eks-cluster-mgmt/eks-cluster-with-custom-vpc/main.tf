@@ -27,7 +27,7 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws" # VPC 모듈의 소스 경로
   version = "6.5.0"                         # VPC 모듈의 버전
 
-  name = "education-vpc" # VPC의 이름
+  name = "education-vpc-${random_string.suffix.result}" # VPC 이름에 랜덤 문자열을 붙여 중복 방지
 
   # VPC의 CIDR 블록을 10.0.0.0/16으로 설정
   cidr = "10.0.0.0/16"
@@ -55,7 +55,11 @@ module "vpc" {
   }
 }
 
-# EKS 클러스터 생성 모듈을 정의. Terraform의 EKS 모듈을 사용
+# -----------------------------------------------------------------------
+# EKS 클러스터 모듈 — 노드 그룹 없이 클러스터와 DaemonSet 기반 애드온만 생성
+# vpc-cni, kube-proxy는 노드 없이도 ACTIVE 전환 가능
+# coredns, aws-ebs-csi-driver는 Deployment 기반이므로 노드 생성 이후에 별도 설치
+# -----------------------------------------------------------------------
 module "eks" {
   source  = "terraform-aws-modules/eks/aws" # EKS 모듈의 소스 경로
   version = "21.8.0"                        # EKS 모듈의 버전
@@ -67,39 +71,126 @@ module "eks" {
   endpoint_public_access                   = true # 클러스터의 퍼블릭 엔드포인트 접근을 허용
   enable_cluster_creator_admin_permissions = true # 클러스터 생성자에게 관리 권한 부여
 
-  # 클러스터 추가 기능 설정 (EBS CSI 드라이버)
+  # DaemonSet 기반 애드온만 모듈 내에서 설치 (노드 없이도 ACTIVE 전환)
   addons = {
-    aws-ebs-csi-driver = {
-      service_account_role_arn = module.irsa-ebs-csi.iam_role_arn # IRSA로 연동된 역할의 ARN 사용
+    vpc-cni = {
+      resolve_conflicts_on_create = "OVERWRITE" # 노드 네트워크에 반드시 필요한 CNI 플러그인
+      resolve_conflicts_on_update = "OVERWRITE"
+    }
+    kube-proxy = {
+      resolve_conflicts_on_create = "OVERWRITE" # 노드 간 네트워크 규칙 관리
+      resolve_conflicts_on_update = "OVERWRITE"
     }
   }
 
   vpc_id     = module.vpc.vpc_id          # 생성된 VPC ID 사용
   subnet_ids = module.vpc.private_subnets # 생성된 사설 서브넷 사용
+}
 
-  # EKS 관리형 노드 그룹 정의
-  eks_managed_node_groups = {
-    one = {
-      name     = "node-group-1"           # 첫 번째 노드 그룹 이름
-      ami_type = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
+# -----------------------------------------------------------------------
+# 노드 그룹용 IAM 역할 — module.eks 완료 후 노드 그룹 생성
+# -----------------------------------------------------------------------
 
-      instance_types = ["t3.small"] # 노드 인스턴스 유형
+# 노드 그룹용 IAM 역할 (EC2 인스턴스가 EKS 노드로 동작하기 위해 필요)
+resource "aws_iam_role" "node_group" {
+  name = "eks-node-group-role-${local.cluster_name}"
 
-      min_size     = 1 # 최소 노드 수
-      max_size     = 3 # 최대 노드 수
-      desired_size = 2 # 원하는 노드 수
-    }
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
 
-    two = {
-      name = "node-group-2" # 두 번째 노드 그룹 이름
+resource "aws_iam_role_policy_attachment" "node_group_worker" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
 
-      instance_types = ["t3.small"] # 노드 인스턴스 유형
+resource "aws_iam_role_policy_attachment" "node_group_cni" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
 
-      min_size     = 1 # 최소 노드 수
-      max_size     = 2 # 최대 노드 수
-      desired_size = 1 # 원하는 노드 수
-    }
+resource "aws_iam_role_policy_attachment" "node_group_ecr" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+# 첫 번째 관리형 노드 그룹 — module.eks 완료(DaemonSet 애드온 포함) 후 생성
+resource "aws_eks_node_group" "one" {
+  cluster_name    = module.eks.cluster_name
+  node_group_name = "node-group-1"
+  node_role_arn   = aws_iam_role.node_group.arn
+  subnet_ids      = module.vpc.private_subnets
+
+  ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
+  instance_types = ["t3.small"]             # 노드 인스턴스 유형
+
+  scaling_config {
+    min_size     = 1 # 최소 노드 수
+    max_size     = 3 # 최대 노드 수
+    desired_size = 2 # 원하는 노드 수
   }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.node_group_worker,
+    aws_iam_role_policy_attachment.node_group_cni,
+    aws_iam_role_policy_attachment.node_group_ecr,
+    module.eks,
+  ]
+}
+
+# 두 번째 관리형 노드 그룹
+resource "aws_eks_node_group" "two" {
+  cluster_name    = module.eks.cluster_name
+  node_group_name = "node-group-2"
+  node_role_arn   = aws_iam_role.node_group.arn
+  subnet_ids      = module.vpc.private_subnets
+
+  instance_types = ["t3.small"] # 노드 인스턴스 유형
+
+  scaling_config {
+    min_size     = 1 # 최소 노드 수
+    max_size     = 2 # 최대 노드 수
+    desired_size = 1 # 원하는 노드 수
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.node_group_worker,
+    aws_iam_role_policy_attachment.node_group_cni,
+    aws_iam_role_policy_attachment.node_group_ecr,
+    module.eks,
+  ]
+}
+
+# -----------------------------------------------------------------------
+# 노드 의존 애드온 — 노드그룹 생성 완료 후 설치
+# coredns, aws-ebs-csi-driver는 Deployment 기반으로 노드가 있어야 ACTIVE 전환
+# -----------------------------------------------------------------------
+
+# 클러스터 내부 DNS 서비스 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "coredns" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "coredns"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.one]
+}
+
+# EBS 볼륨을 Kubernetes PV로 사용하기 위한 드라이버 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "ebs_csi_driver" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "aws-ebs-csi-driver"
+  service_account_role_arn    = module.irsa-ebs-csi.iam_role_arn # IRSA로 연동된 역할의 ARN 사용
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.one]
 }
 
 # EBS CSI 드라이버 정책을 불러옴

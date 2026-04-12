@@ -25,7 +25,7 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "6.5.0"
 
-  name = "education-vpc"
+  name = "education-vpc-${random_string.suffix.result}" # VPC 이름에 랜덤 문자열을 붙여 중복 방지
 
   cidr = "10.0.0.0/16"
   azs  = slice(data.aws_availability_zones.available.names, 0, 3)
@@ -57,43 +57,69 @@ module "eks" {
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
 
-  # 클러스터에 설치할 Addons 목록 및 IRSA 구성, overwrite 정책 적용
+  # DaemonSet 기반 애드온만 모듈 내에서 설치 (노드 없이도 ACTIVE 전환 가능)
+  # coredns, aws-ebs-csi-driver, aws-efs-csi-driver는 Deployment 기반이므로
+  # 노드그룹 생성 이후에 별도 aws_eks_addon 리소스로 설치
   addons = {
-    # Amazon VPC CNI
+    # Amazon VPC CNI (DaemonSet 기반 → 노드 없이도 ACTIVE)
     vpc-cni = {
-      #version                  = "v1.12.7"
-      update_policy            = "OVERWRITE"                      # 덮어쓰기 정책 설정
+      update_policy            = "OVERWRITE"
       service_account_role_arn = module.irsa_vpc_cni.iam_role_arn # IRSA 역할 추가
     }
 
-    # CoreDNS
-    coredns = {
-      #version       = "v1.8.7-eksbuild.1"
-      update_policy = "OVERWRITE"
-    }
-
-    # Kube-proxy
+    # Kube-proxy (DaemonSet 기반 → 노드 없이도 ACTIVE)
     kube-proxy = {
-      #version       = "v1.20.4-eksbuild.2"
       update_policy = "OVERWRITE"
-    }
-
-    # Amazon EBS CSI Driver
-    aws-ebs-csi-driver = {
-      #version                  = "v1.3.0"
-      update_policy            = "OVERWRITE"
-      service_account_role_arn = module.irsa-ebs-csi.iam_role_arn # IRSA 역할 추가
-    }
-
-    # Amazon EFS CSI Driver
-    aws-efs-csi-driver = {
-      update_policy            = "OVERWRITE"
-      service_account_role_arn = module.irsa-efs-csi.iam_role_arn # IRSA 역할 추가
     }
   }
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
+}
+
+# -----------------------------------------------------------------------
+# 노드 의존 애드온 — 노드그룹 생성 완료 후 설치
+# Deployment 기반이라 노드가 있어야 pod가 스케줄되어 ACTIVE 전환
+# -----------------------------------------------------------------------
+
+# 클러스터 내부 DNS 서비스 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "coredns" {
+  cluster_name             = module.eks.cluster_name
+  addon_name               = "coredns"
+  resolve_conflicts_on_update = "OVERWRITE" # 충돌 시 강제 덮어쓰기
+
+  depends_on = [module.eks_managed_node_groups]
+}
+
+# EBS 볼륨을 Kubernetes PV로 사용하기 위한 드라이버 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "ebs_csi_driver" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "aws-ebs-csi-driver"
+  resolve_conflicts_on_update = "OVERWRITE" # 충돌 시 강제 덮어쓰기
+  service_account_role_arn    = module.irsa-ebs-csi.iam_role_arn # IRSA 역할 추가
+
+  depends_on = [module.eks_managed_node_groups]
+}
+
+# EFS 볼륨을 Kubernetes PV로 사용하기 위한 드라이버 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "efs_csi_driver" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "aws-efs-csi-driver"
+  resolve_conflicts_on_update = "OVERWRITE" # 충돌 시 강제 덮어쓰기
+  service_account_role_arn    = module.irsa-efs-csi.iam_role_arn # IRSA 역할 추가
+
+  depends_on = [module.eks_managed_node_groups]
+}
+
+# CloudWatch 옵저버빌리티 애드온 — 컨테이너 로그·메트릭·트레이스를 CloudWatch로 전송
+# (Deployment/DaemonSet 기반 → 노드 필요)
+resource "aws_eks_addon" "cloudwatch_observability" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "amazon-cloudwatch-observability"
+  resolve_conflicts_on_update = "OVERWRITE"                                      # 충돌 시 강제 덮어쓰기
+  service_account_role_arn    = module.irsa-cloudwatch.iam_role_arn              # IRSA 역할 추가
+
+  depends_on = [module.eks_managed_node_groups]
 }
 
 module "eks_managed_node_groups" {
@@ -104,6 +130,10 @@ module "eks_managed_node_groups" {
   cluster_name         = module.eks.cluster_name         # EKS 클러스터 이름
   cluster_service_cidr = module.eks.cluster_service_cidr # 클러스터 서비스 CIDR
   subnet_ids           = module.vpc.private_subnets      # 사설 서브넷 ID
+
+  # kubernetes_version을 명시적으로 지정 — 미지정 시 최신 버전 AMI를 조회하여
+  # 클러스터 버전(1.34)과 불일치 오류 발생
+  kubernetes_version = "1.34"
 
   ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
   instance_types = ["c5.large"]             # 노드 인스턴스 유형
@@ -136,6 +166,22 @@ module "irsa-efs-csi" {
   oidc_fully_qualified_subjects = ["system:serviceaccount:kube-system:efs-csi-controller-sa"]
 }
 
+# CloudWatch 에이전트가 메트릭·로그를 CloudWatch로 전송하기 위한 IAM 역할 (IRSA)
+module "irsa-cloudwatch" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
+  version = "4.20"
+
+  create_role  = true
+  role_name    = "AmazonEKSCloudWatchRole-${module.eks.cluster_name}"
+  provider_url = module.eks.oidc_provider
+  role_policy_arns = [
+    "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy", # CloudWatch 메트릭·로그 전송
+    "arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess",      # X-Ray 트레이스 전송 (선택)
+  ]
+  # amazon-cloudwatch 네임스페이스의 cloudwatch-agent 서비스어카운트에 역할 허용
+  oidc_fully_qualified_subjects = ["system:serviceaccount:amazon-cloudwatch:cloudwatch-agent"]
+}
+
 module "irsa_vpc_cni" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
   version = "4.20"
@@ -148,11 +194,12 @@ module "irsa_vpc_cni" {
 }
 
 # EFS 파일 시스템 생성
+# creation_token은 리전 내 고유해야 하므로 랜덤 문자열로 중복 방지
 resource "aws_efs_file_system" "example" {
-  creation_token = "efs-example"
+  creation_token = "efs-example-${random_string.suffix.result}"
   encrypted      = true # 암호화 여부
   tags = {
-    Name = "example-efs"
+    Name = "example-efs-${random_string.suffix.result}"
   }
 }
 
@@ -163,8 +210,9 @@ output "efs_file_system_id" {
 
 
 # EFS 보안 그룹 생성
+# 이름에 랜덤 문자열을 붙여 재배포 시 이름 충돌을 방지
 resource "aws_security_group" "my_efs_sg" {
-  name        = "efs-sg"
+  name        = "efs-sg-${random_string.suffix.result}"
   description = "Allow NFS traffic for EFS"
   vpc_id      = module.vpc.vpc_id # VPC ID를 VPC 모듈에서 가져옴
 
@@ -185,17 +233,17 @@ resource "aws_security_group" "my_efs_sg" {
   }
 
   tags = {
-    Name = "efs-sg"
+    Name = "efs-sg-${random_string.suffix.result}"
   }
 }
 
 
 # 각 서브넷(가용 영역)에 대해 EFS 마운트 타겟 생성
+# toset() 대신 인덱스를 키로 사용하는 map을 사용 — subnet ID는 apply 전까지 미지수이지만
+# 인덱스(0, 1, 2)는 변수에서 개수가 정해지므로 plan 단계에서 키를 확정할 수 있음
 resource "aws_efs_mount_target" "example" {
-  for_each        = toset(module.vpc.private_subnets) # 모든 프라이빗 서브넷에 대해 반복
+  for_each        = { for i, v in module.vpc.private_subnets : tostring(i) => v }
   file_system_id  = aws_efs_file_system.example.id
   subnet_id       = each.value
   security_groups = [aws_security_group.my_efs_sg.id]
-
-  depends_on = [module.vpc.private_subnets]
 }

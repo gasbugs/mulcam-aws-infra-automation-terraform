@@ -17,7 +17,8 @@ resource "aws_eks_fargate_profile" "example_fargate_profile" {
 }
 
 resource "aws_iam_role" "fargate_pod_execution_role" {
-  name = "eks-fargate-pod-execution-role"
+  # IAM 역할 이름은 계정 전역 고유해야 하므로 클러스터 이름을 붙여 중복 방지
+  name = "eks-fargate-pod-execution-role-${module.eks.cluster_name}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

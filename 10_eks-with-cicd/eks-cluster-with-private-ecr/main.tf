@@ -63,16 +63,22 @@ module "eks" {
 
   # 클러스터 이름과 버전 설정
   name               = local.cluster_name # 로컬에서 정의한 클러스터 이름 사용
-  kubernetes_version = "1.33"             # EKS 클러스터의 버전 설정
+  kubernetes_version = "1.34"             # EKS 클러스터의 버전 설정 (최신 안정 버전으로 업데이트)
 
   endpoint_public_access                   = false # 클러스터의 퍼블릭 엔드포인트 접근을 허용
   enable_cluster_creator_admin_permissions = true  # 클러스터 생성자에게 관리 권한 부여
   endpoint_private_access                  = true  # 클러스터의 프라이빗 엔드포인트 접근을 허용
 
-  # 클러스터 추가 기능 설정 (EBS CSI 드라이버)
+  # DaemonSet 기반 애드온만 모듈 내에서 설치 (노드 없이도 ACTIVE 전환 가능)
+  # aws-ebs-csi-driver는 Deployment 기반이므로 노드그룹 이후에 별도 리소스로 설치
   addons = {
-    aws-ebs-csi-driver = {
-      service_account_role_arn = module.irsa-ebs-csi.iam_role_arn # IRSA로 연동된 역할의 ARN 사용
+    vpc-cni = {
+      resolve_conflicts_on_create = "OVERWRITE" # 노드 네트워크에 반드시 필요한 CNI 플러그인
+      resolve_conflicts_on_update = "OVERWRITE"
+    }
+    kube-proxy = {
+      resolve_conflicts_on_create = "OVERWRITE" # 노드 간 네트워크 규칙 관리
+      resolve_conflicts_on_update = "OVERWRITE"
     }
   }
 
@@ -119,6 +125,22 @@ module "eks" {
       ipv6_cidr_blocks = ["::/0"]
     }
   }
+}
+
+# -----------------------------------------------------------------------
+# 노드 의존 애드온 — 노드그룹 생성 완료 후 설치
+# aws-ebs-csi-driver는 Deployment 기반이라 노드가 있어야 ACTIVE 전환
+# -----------------------------------------------------------------------
+
+# EBS 볼륨을 Kubernetes PV로 사용하기 위한 드라이버 (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "ebs_csi_driver" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "aws-ebs-csi-driver"
+  service_account_role_arn    = module.irsa-ebs-csi.iam_role_arn # IRSA로 연동된 역할의 ARN 사용
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [module.eks_managed_node_groups]
 }
 
 module "eks_managed_node_groups" {

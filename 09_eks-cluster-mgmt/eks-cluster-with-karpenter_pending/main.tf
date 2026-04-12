@@ -30,47 +30,30 @@ locals {
 ################################################################################
 
 module "eks" {
-  source = "terraform-aws-modules/eks/aws"
+  source  = "terraform-aws-modules/eks/aws"
+  version = "21.8.0" # 버전 핀 추가 (재현 가능한 빌드를 위해 항상 버전 고정 권장)
 
-  cluster_name    = local.name
-  cluster_version = "1.33"
+  # v21: cluster_name → name, cluster_version → kubernetes_version
+  name               = local.name
+  kubernetes_version = "1.34"
 
   # Gives Terraform identity admin access to cluster which will
   # allow deploying resources (Karpenter) into the cluster
   enable_cluster_creator_admin_permissions = true
-  cluster_endpoint_public_access           = true
+  # v21: cluster_endpoint_public_access → endpoint_public_access
+  endpoint_public_access = true
 
-  cluster_addons = {
-    coredns                = {}
-    eks-pod-identity-agent = {}
-    kube-proxy             = {}
-    vpc-cni                = {}
+  # DaemonSet 기반 애드온 — 노드 없이도 ACTIVE 전환 가능
+  # coredns는 Deployment 기반이므로 노드 그룹 완료 후 aws_eks_addon 리소스로 별도 설치
+  addons = {
+    eks-pod-identity-agent = {} # Pod Identity 에이전트 (DaemonSet)
+    kube-proxy             = {} # 노드 간 네트워크 규칙 관리 (DaemonSet)
+    vpc-cni                = {} # 파드에 VPC IP 직접 할당 (DaemonSet)
   }
 
   vpc_id                   = module.vpc.vpc_id
   subnet_ids               = module.vpc.private_subnets
   control_plane_subnet_ids = module.vpc.intra_subnets
-
-  eks_managed_node_groups = {
-    karpenter = {
-      ami_type       = "AL2023_x86_64_STANDARD"
-      instance_types = ["m5.large"]
-
-      min_size     = 2
-      max_size     = 3
-      desired_size = 2
-
-      taints = {
-        # This Taint aims to keep just EKS Addons and Karpenter running on this MNG
-        # The pods that do not tolerate this taint should run on nodes created by Karpenter
-        addons = {
-          key    = "CriticalAddonsOnly"
-          value  = "true"
-          effect = "NO_SCHEDULE"
-        }
-      }
-    }
-  }
 
   # cluster_tags = merge(local.tags, {
   #   NOTE - only use this option if you are using "attach_cluster_primary_security_group"
@@ -90,6 +73,101 @@ module "eks" {
 
 
 ################################################################################
+# 노드 그룹 — EKS 모듈과 분리하여 별도 리소스로 생성
+# CriticalAddonsOnly taint로 Karpenter/EKS 시스템 컴포넌트만 이 노드에서 실행
+# Karpenter가 관리하는 애플리케이션 파드는 이 노드를 피해 Karpenter 프로비저닝 노드로 배치됨
+################################################################################
+
+# 노드 그룹용 IAM 역할 (EC2 인스턴스가 EKS 노드로 동작하기 위해 필요)
+resource "aws_iam_role" "node_group" {
+  name = "eks-node-group-role-${local.name}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "node_group_worker" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "node_group_cni" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+resource "aws_iam_role_policy_attachment" "node_group_ecr" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy_attachment" "node_group_ssm" {
+  role       = aws_iam_role.node_group.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# Karpenter와 EKS Addon을 실행하기 위한 관리형 노드 그룹
+resource "aws_eks_node_group" "karpenter" {
+  cluster_name    = module.eks.cluster_name
+  node_group_name = "karpenter"
+  node_role_arn   = aws_iam_role.node_group.arn
+  subnet_ids      = module.vpc.private_subnets
+
+  ami_type       = "AL2023_x86_64_STANDARD"
+  instance_types = ["m5.large"]
+
+  scaling_config {
+    min_size     = 2
+    max_size     = 3
+    desired_size = 2
+  }
+
+  taint {
+    # EKS Addon과 Karpenter만 이 노드에서 실행되도록 taint 설정
+    # 일반 애플리케이션 파드는 이 taint를 tolerate하지 않으면 Karpenter 프로비저닝 노드로 이동
+    key    = "CriticalAddonsOnly"
+    value  = "true"
+    effect = "NO_SCHEDULE"
+  }
+
+  labels = {
+    "karpenter.sh/discovery" = local.name
+  }
+
+  tags = local.tags
+
+  depends_on = [
+    aws_iam_role_policy_attachment.node_group_worker,
+    aws_iam_role_policy_attachment.node_group_cni,
+    aws_iam_role_policy_attachment.node_group_ecr,
+    aws_iam_role_policy_attachment.node_group_ssm,
+    module.eks,
+  ]
+}
+
+# -----------------------------------------------------------------------
+# 노드 의존 애드온 — 노드그룹 완료 후 설치 (Deployment 기반 → 노드 필요)
+# -----------------------------------------------------------------------
+
+# 클러스터 내부 DNS (Deployment 기반 → 노드 필요)
+resource "aws_eks_addon" "coredns" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "coredns"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.karpenter]
+}
+
+################################################################################
 # Karpenter
 ################################################################################
 
@@ -97,11 +175,9 @@ module "karpenter" {
   source = "./.terraform/modules/eks/modules/karpenter"
 
   cluster_name                    = local.name
-  enable_v1_permissions           = true
-  enable_pod_identity             = true
-  create_pod_identity_association = true
+  create_pod_identity_association = true # Pod Identity를 통해 Karpenter ServiceAccount에 IAM 역할 연결
 
-  # Used to attach additional IAM policies to the Karpenter node IAM role
+  # Karpenter가 프로비저닝하는 노드에 SSM 접근 허용 (디버깅 및 운영 편의)
   node_iam_role_additional_policies = {
     AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   }
@@ -146,7 +222,8 @@ resource "helm_release" "karpenter" {
 
 # EKS에서 추천되는 AMI 검색 
 data "aws_ssm_parameter" "eks_ami" {
-  name = "/aws/service/eks/optimized-ami/1.31/amazon-linux-2023/x86_64/standard/recommended/image_id"
+  # kubernetes_version과 동일한 버전의 EKS 최적화 AMI ID를 SSM Parameter Store에서 동적으로 조회
+  name = "/aws/service/eks/optimized-ami/1.34/amazon-linux-2023/x86_64/standard/recommended/image_id"
 }
 
 resource "kubectl_manifest" "karpenter_node_class" {
