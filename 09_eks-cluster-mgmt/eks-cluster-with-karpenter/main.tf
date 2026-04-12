@@ -114,6 +114,19 @@ resource "aws_iam_role_policy_attachment" "node_group_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Karpenter 시스템 노드 그룹용 런치 템플릿 — IMDS hop limit 2 설정
+# Karpenter 파드가 EC2 메타데이터 서비스(IMDS)를 통해 리전 정보를 가져오려면
+# hop limit이 최소 2 이상이어야 함 (기본값 1이면 컨테이너에서 401 오류 발생)
+resource "aws_launch_template" "karpenter_system" {
+  name_prefix = "karpenter-system-"
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"        # IMDSv2 강제
+    http_put_response_hop_limit = 2                 # 파드 → 노드 → IMDS 2홉 허용
+  }
+}
+
 # Karpenter와 EKS Addon을 실행하기 위한 관리형 노드 그룹
 resource "aws_eks_node_group" "karpenter" {
   cluster_name    = module.eks.cluster_name
@@ -123,6 +136,11 @@ resource "aws_eks_node_group" "karpenter" {
 
   ami_type       = "AL2023_x86_64_STANDARD"
   instance_types = ["m5.large"]
+
+  launch_template {
+    id      = aws_launch_template.karpenter_system.id
+    version = aws_launch_template.karpenter_system.latest_version
+  }
 
   scaling_config {
     min_size     = 2
