@@ -195,12 +195,12 @@ resource "aws_eks_addon" "efs_csi_driver" {
 module "karpenter" {
   source = "./.terraform/modules/eks/modules/karpenter"
 
-  cluster_name                    = local.name
-  enable_v1_permissions           = true
-  enable_pod_identity             = true
+  cluster_name = local.name
+
+  # Pod Identity 연결 자동 생성 (Karpenter 서비스 계정 → IAM 역할 연결)
   create_pod_identity_association = true
 
-  # Used to attach additional IAM policies to the Karpenter node IAM role
+  # Karpenter가 관리하는 노드의 IAM 역할에 추가 정책 부여
   node_iam_role_additional_policies = {
     AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   }
