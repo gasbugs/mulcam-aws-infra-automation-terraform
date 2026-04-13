@@ -270,13 +270,15 @@ def _delete_account(cred: dict) -> None:
         ("efs_cleanup",             lambda: perform_efs_cleanup(session, log, regions),              "EFS 삭제 중"),
         ("secretsmanager_cleanup",  lambda: perform_secretsmanager_cleanup(session, log, regions),   "Secrets Manager 삭제 중"),
         ("codebuild_cleanup",       lambda: perform_codebuild_cleanup(session, log, regions),        "CodeBuild 삭제 중"),
+        # CloudFront를 WAFv2보다 먼저 삭제해야 한다 — CreatedByCloudFront-* WAF ACL은
+        # CloudFront 배포와 연결된 상태에서 삭제하면 실패하므로 CF 삭제 후 WAFv2를 정리한다
+        ("cf_cleanup",              lambda: perform_cloudfront_cleanup(session, log),                "CloudFront 정리 중"),
         ("wafv2_cleanup",           lambda: perform_wafv2_cleanup(session, log, regions),            "WAFv2 삭제 중"),
         ("backup_cleanup",          lambda: perform_backup_cleanup(session, log, regions),           "Backup 볼트 삭제 중"),
         ("dynamodb_cleanup",        lambda: perform_dynamodb_cleanup(session, log, regions),         "DynamoDB 삭제 중"),
         ("sns_cleanup",             lambda: perform_sns_cleanup(session, log, regions),              "SNS 삭제 중"),
         ("sqs_cleanup",             lambda: perform_sqs_cleanup(session, log, regions),              "SQS 삭제 중"),
         ("iam_cleanup",             lambda: perform_iam_cleanup(session, log),                       "IAM 정리 중"),
-        ("cf_cleanup",              lambda: perform_cloudfront_cleanup(session, log),                "CloudFront 정리 중"),
         ("acm_cleanup",             lambda: perform_acm_cleanup(session, log, regions),              "ACM 인증서 삭제 중"),
         ("ami_cleanup",             lambda: perform_ami_cleanup(session, log, regions),              "AMI 정리 중"),
         ("snap_cleanup",            lambda: perform_ebs_snapshot_cleanup(session, log, regions),     "EBS 스냅샷 삭제 중"),
