@@ -12,6 +12,16 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    # RSA 키 쌍 생성용 프로바이더 — EC2 SSH 접속 키를 Terraform 내에서 직접 생성
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    # 로컬 파일 저장용 프로바이더 — 생성된 프라이빗 키를 .pem 파일로 저장
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
+    }
   }
 }
 
