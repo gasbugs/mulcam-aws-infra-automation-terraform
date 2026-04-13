@@ -25,17 +25,17 @@ resource "aws_dynamodb_table" "movies" {
 }
 
 # DynamoDB VPC 엔드포인트 - VPC 내부에서 인터넷을 거치지 않고 DynamoDB에 안전하게 접근
-# Interface 타입: VPC 내부에 네트워크 인터페이스를 생성하여 DynamoDB 연결 (Private DNS 지원)
+# Interface 타입: VPC 내부에 네트워크 인터페이스(ENI)를 생성하여 DynamoDB 연결
+# 주의: DynamoDB Interface 엔드포인트는 private_dns_enabled = false 만 지원 (AWS 정책)
 resource "aws_vpc_endpoint" "dynamodb" {
   vpc_id       = module.vpc.vpc_id
   service_name = "com.amazonaws.${var.aws_region}.dynamodb"
 
   # Interface 타입: VPC 내에 실제 네트워크 인터페이스(ENI)를 생성하는 방식
-  # Gateway 타입보다 비용이 발생하지만 Private DNS를 통해 투명하게 접근 가능
   vpc_endpoint_type   = "Interface"
   subnet_ids          = module.vpc.private_subnets # 엔드포인트가 생성될 서브넷 (필수)
   security_group_ids  = [aws_security_group.allow_dynamodb.id]
-  private_dns_enabled = true # VPC 내부에서 표준 DynamoDB 엔드포인트로 접근 가능하도록 DNS 설정
+  private_dns_enabled = false # DynamoDB 서비스는 Private DNS를 제공하지 않으므로 false 설정
 
   tags = {
     Name = "dynamodb-vpc-endpoint"

@@ -145,6 +145,6 @@ resource "helm_release" "argocd" {
     file("${path.module}/argocd-values.yaml")
   ]
 
-  # 노드 그룹이 준비되고 kubectl 설정이 완료된 후 ArgoCD 설치
-  depends_on = [module.eks_managed_node_groups, terraform_data.eks_kubectl_config]
+  # 노드 그룹이 준비된 후 ArgoCD 설치 (exec 방식 provider는 kubeconfig 파일 불필요)
+  depends_on = [module.eks_managed_node_groups]
 }

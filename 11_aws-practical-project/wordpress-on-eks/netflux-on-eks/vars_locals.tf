@@ -8,6 +8,12 @@ variable "aws_region" {
   default = "us-east-1"
 }
 
+# AWS CLI 프로파일 이름 (kubeconfig 업데이트 시 올바른 자격증명 사용을 위해 명시)
+variable "aws_profile" {
+  description = "AWS CLI profile name used for kubeconfig update"
+  default     = "my-profile"
+}
+
 #########################################
 # cicd
 variable "project_name" {

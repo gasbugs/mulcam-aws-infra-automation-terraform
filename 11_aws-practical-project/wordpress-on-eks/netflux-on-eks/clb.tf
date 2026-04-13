@@ -1,16 +1,10 @@
-# Kubernetes 프로바이더 설정 (로컬 kubeconfig 파일 사용)
-provider "kubernetes" {
-  config_path = "${pathexpand("~")}/.kube/config"
-}
-
 # netflux 애플리케이션을 위한 전용 네임스페이스 생성
 # 네임스페이스는 Kubernetes 클러스터 안에서 리소스를 논리적으로 분리하는 단위
 resource "kubernetes_namespace_v1" "netflux" {
   metadata {
     name = "netflux"
   }
-  # kubectl 설정이 완료된 후 네임스페이스 생성
-  depends_on = [terraform_data.eks_kubectl_config]
+  # exec 방식 provider는 EKS 클러스터 output을 직접 참조하므로 별도 depends_on 불필요
 }
 
 # Kubernetes 서비스: 외부에서 netflux 파드에 접근할 수 있도록 로드밸런서 생성

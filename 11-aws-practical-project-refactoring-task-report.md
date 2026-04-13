@@ -128,20 +128,49 @@ Plan: 100 to add, 0 to change, 0 to destroy.
 | EKS 애드온 구조 | 모두 EKS 모듈 내 | DaemonSet/Deployment 분리 |
 | Kubernetes 리소스 | deprecated v1beta 사용 | `_v1` suffix 최신 버전 사용 |
 | Webhook 브랜치 | `master` (파이프라인과 불일치) | `main`으로 통일 |
-| DynamoDB VPC Endpoint | subnet_ids 누락 | subnet_ids + private_dns_enabled 추가 |
+| DynamoDB VPC Endpoint | `private_dns_enabled = true` (DynamoDB Interface 엔드포인트는 지원 안 함) | `false`로 수정 |
+| `provider.tf` (EKS) | kubeconfig 파일 의존 (`config_path`) + `terraform_data.eks_kubectl_config` 패턴 | `exec` 블록으로 교체 (kubeconfig 불필요) |
+| `provider.tf` (EKS) | node group에 `kubernetes_version` 미지정 → 최신(1.35) AMI 선택으로 버전 불일치 | `kubernetes_version = "1.32"` 명시 |
+| `provider.tf` (EKS) | `eksctl utils write-kubeconfig` 사용 | `aws eks update-kubeconfig` 로 교체 (이후 exec 방식으로 완전 제거) |
 | resource description | 한국어 혼용 | 영어 통일 |
 | README | 기본 요구사항만 | 아키텍처 다이어그램, 풀이, 검증 명령 추가 |
 
 ---
 
-## 5. apply 결과 (업데이트 예정)
+## 5. apply 결과
 
 ### wordpress-on-ec2
 
 ```
-(적용 완료 후 업데이트 예정)
+Apply complete! Resources: 39 to add, 0 to change, 0 to destroy.
+lb_dns = "wordpress-lb-348931344.us-east-1.elb.amazonaws.com"
 ```
+
+- ASG 인스턴스 갱신(Instance Refresh) 완료 — WordPress URL이 ALB 도메인으로 교체됨
+- JavaScript/CSS 오류 0개 확인
+- 스냅샷: `snapshots/wordpress-ec2-fixed.png`
 
 ### wordpress-on-eks (netflux-on-eks)
 
-> 🔄 현재 실행 중 (백그라운드 - EKS 클러스터 생성 약 20~30분)
+```
+Apply complete! Resources: 118 to add, 0 to change, 0 to destroy.
+load_balancer_hostname = "aeda0c1d1f3af4215b6a7cff185a870a-230412126.us-east-1.elb.amazonaws.com"
+```
+
+- EKS 클러스터 Kubernetes 1.32 정상 실행 (노드 v1.32.12-eks-f69f56f)
+- ArgoCD 배포 완료 — 로그인 UI 정상 접속 확인
+- CloudFront 배포 완료 — 도메인: `d3h51yjtnrxnfh.cloudfront.net`
+- CLB 서비스 생성 완료 — netflux 앱은 ArgoCD 설정 후 수강생이 배포
+- 스냅샷: `snapshots/netflux-argocd.png`, `snapshots/netflux-cloudfront.png`
+
+---
+
+## 6. 주요 추가 수정 사항 (apply 중 발견)
+
+| 발생 시점 | 원인 | 수정 |
+|---|---|---|
+| packer build | Packer가 `[default]` 프로파일 사용 (Terraform provider 설정 미상속) | `environment = { AWS_PROFILE = "my-profile" }` 추가 |
+| EC2 user_data | WordPress siteurl/home이 `example.com`으로 고정 → JS/CSS 깨짐 | user_data에 `wp option update` 명령 추가 |
+| EKS node group | `kubernetes_version` 미지정 → 최신(1.35) AMI 선택으로 버전 불일치 | `kubernetes_version = "1.32"` 명시 |
+| EKS kubeconfig | `eksctl` 미설치 환경에서 kubeconfig 업데이트 실패 | `aws eks update-kubeconfig`로 교체 → 최종 `exec` 블록 방식으로 완전 전환 |
+| DynamoDB endpoint | `private_dns_enabled = true` (Interface 타입 미지원) | `false`로 수정 |
