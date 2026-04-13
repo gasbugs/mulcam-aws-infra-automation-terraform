@@ -168,3 +168,146 @@ resource "aws_lambda_permission" "allow_secrets_manager" {
   function_name = aws_lambda_function.rotate_secret.function_name
   principal     = "secretsmanager.amazonaws.com"
 }
+
+###############
+# EC2 인스턴스 — Secrets Manager에서 시크릿 값을 직접 읽어보는 실습용 서버
+
+# 디폴트 VPC 정보 조회 — 별도 VPC 없이 기본 제공 VPC 사용
+data "aws_vpc" "default" {
+  default = true
+}
+
+# AL2023 최신 AMI 자동 조회 — 항상 최신 이미지를 사용하도록 동적으로 조회
+data "aws_ami" "al2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+}
+
+# 보안 그룹 — SSH(22번 포트) 접속만 허용하는 방화벽 규칙
+resource "aws_security_group" "ssh_sg" {
+  name        = "${var.environment}-ssh-access-sg"
+  description = "Allow SSH access"
+  vpc_id      = data.aws_vpc.default.id # 디폴트 VPC ID 사용
+
+  ingress {
+    from_port   = 22 # SSH 포트
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # 모든 IP 주소에서 접근 허용 (실습용)
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1" # 모든 아웃바운드 트래픽 허용
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.environment}-ssh-sg"
+    Environment = var.environment
+  }
+}
+
+# RSA 키 쌍 자동 생성 — 외부 파일 없이 Terraform이 직접 SSH 키를 생성
+resource "tls_private_key" "ec2_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+# AWS에 공개 키 등록 — EC2 접속 시 사용할 키페어를 AWS에 업로드
+resource "aws_key_pair" "ec2_key_pair" {
+  key_name   = "ec2-key-${random_integer.secret_suffix.result}" # 시크릿과 같은 랜덤 숫자로 키 이름 생성
+  public_key = tls_private_key.ec2_key.public_key_openssh       # TLS 프로바이더가 생성한 공개 키 사용
+}
+
+# 프라이빗 키를 로컬 파일로 저장 — SSH 접속 시 사용할 .pem 파일 생성
+resource "local_file" "private_key" {
+  content         = tls_private_key.ec2_key.private_key_pem
+  filename        = "${path.module}/ec2-key.pem"
+  file_permission = "0400" # 소유자만 읽기 가능 (SSH 보안 요구사항)
+}
+
+# EC2 IAM 역할 — 인스턴스가 Secrets Manager에 직접 접근할 수 있는 권한 부여
+resource "aws_iam_role" "ec2_secrets_manager_role" {
+  name = "${var.environment}-ec2-secrets-manager-role"
+
+  assume_role_policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Effect" : "Allow",
+        "Principal" : {
+          "Service" : "ec2.amazonaws.com"
+        },
+        "Action" : "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "${var.environment}-ec2-secrets-role"
+    Environment = var.environment
+  }
+}
+
+# Secrets Manager 읽기 정책 — 이 프로젝트에서 생성한 시크릿만 읽을 수 있는 최소 권한
+resource "aws_iam_policy" "ec2_secrets_manager_policy" {
+  name        = "${var.environment}-ec2-secrets-manager-access-policy"
+  description = "Policy to allow EC2 to read the secret from Secrets Manager"
+  policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "secretsmanager:GetSecretValue"
+        ],
+        "Resource" : aws_secretsmanager_secret.example_secret.arn
+      },
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "kms:Decrypt"
+        ],
+        "Resource" : aws_kms_key.example_key.arn
+      }
+    ]
+  })
+}
+
+# 역할에 정책 연결 — EC2 역할에 Secrets Manager 읽기 권한 부여
+resource "aws_iam_role_policy_attachment" "attach_ec2_secrets_policy" {
+  role       = aws_iam_role.ec2_secrets_manager_role.name
+  policy_arn = aws_iam_policy.ec2_secrets_manager_policy.arn
+}
+
+# 인스턴스 프로파일 — IAM 역할을 EC2에 연결하는 중간 매개체
+resource "aws_iam_instance_profile" "ec2_instance_profile" {
+  name = "${var.environment}-ec2-secrets-manager-profile"
+  role = aws_iam_role.ec2_secrets_manager_role.name
+}
+
+# EC2 인스턴스 생성 — Secrets Manager에서 시크릿 값을 읽어오는 실습용 서버
+resource "aws_instance" "ec2_instance" {
+  ami                    = data.aws_ami.al2023.id                              # 최신 AL2023 AMI 사용
+  instance_type          = "t3.micro"                                          # 무료 티어 호환 인스턴스 타입
+  key_name               = aws_key_pair.ec2_key_pair.key_name                  # 생성된 키페어 연결
+  iam_instance_profile   = aws_iam_instance_profile.ec2_instance_profile.name # IAM 프로파일 연결
+  vpc_security_group_ids = [aws_security_group.ssh_sg.id]                      # SSH 보안 그룹 적용
+
+  tags = {
+    Name        = "${var.environment}-secrets-demo-ec2"
+    Environment = var.environment
+  }
+}

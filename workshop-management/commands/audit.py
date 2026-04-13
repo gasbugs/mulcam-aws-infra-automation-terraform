@@ -107,6 +107,20 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
                 enabled  = sum(1 for d in all_dists if d.get("Enabled"))
                 disabled = len(all_dists) - enabled
                 parts = ([f"활성화 {enabled}개"] if enabled else []) + ([f"비활성화 {disabled}개"] if disabled else [])
+                # 배포별 모니터링 구독(실시간 메트릭 플랜) 활성화 여부 추가 확인
+                subscribed = 0
+                for d in all_dists:
+                    try:
+                        resp = client.get_monitoring_subscription(DistributionId=d["Id"])
+                        s = (resp.get("MonitoringSubscription", {})
+                             .get("RealtimeMetricsSubscriptionConfig", {})
+                             .get("RealtimeMetricsSubscriptionStatus", "Disabled"))
+                        if s == "Enabled":
+                            subscribed += 1
+                    except Exception:
+                        pass
+                if subscribed:
+                    parts.append(f"모니터링 구독 활성화 {subscribed}개 → clean 시 자동 해지")
                 return f"CloudFront 리소스 {len(all_dists)}개 발견 (글로벌) — {', '.join(parts)}"
 
         elif resource_name == "KMS Keys (CMK)":
@@ -200,10 +214,14 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
                 return f"{resource_name} 리소스 {len(resources)}개 발견 (리전: {region})"
 
         elif resource_name == "IAM Roles (Custom)":
-            # 서비스 연결 역할(service-linked role) 및 AWS 관리형 역할 제외
+            # 서비스 연결 역할(service-linked role), AWS SSO 예약 역할, AWS 관리형 역할 제외
+            # AWSReservedSSO_* 역할은 IAM Identity Center(SSO)가 자동 생성하는 시스템 역할로
+            # 삭제하면 SSO 로그인이 불가해지므로 반드시 제외한다
             roles = [r for r in client.list_roles().get(result_key, [])
                      if not r.get("Path", "").startswith("/aws-service-role/")
-                     and "AWSServiceRole" not in r.get("RoleName", "")]
+                     and not r.get("Path", "").startswith("/aws-reserved/")
+                     and "AWSServiceRole" not in r.get("RoleName", "")
+                     and "AWSReservedSSO" not in r.get("RoleName", "")]
             if roles:
                 return f"IAM 역할 {len(roles)}개 발견: {', '.join(r['RoleName'] for r in roles)}"
 

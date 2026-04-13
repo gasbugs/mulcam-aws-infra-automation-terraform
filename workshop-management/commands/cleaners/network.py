@@ -10,9 +10,30 @@ import time
 from botocore.exceptions import BotoCoreError, ClientError
 
 
+def _cancel_monitoring_subscription(cf, dist_id: str, log: list) -> None:
+    """CloudFront 배포의 실시간 모니터링 구독을 해지한다.
+    구독이 활성화된 상태로 두면 무료 체험 종료 후 CloudWatch 커스텀 메트릭 비용이 발생한다.
+    배포 삭제 전에 반드시 해지해야 삭제가 정상적으로 진행된다."""
+    try:
+        resp = cf.get_monitoring_subscription(DistributionId=dist_id)
+        status = (
+            resp.get("MonitoringSubscription", {})
+            .get("RealtimeMetricsSubscriptionConfig", {})
+            .get("RealtimeMetricsSubscriptionStatus", "Disabled")
+        )
+        if status == "Enabled":
+            cf.delete_monitoring_subscription(DistributionId=dist_id)
+            log.append(f"  [CloudFront 정리] 모니터링 구독 해지 완료: {dist_id}")
+    except ClientError:
+        # 구독이 없거나 이미 해지된 경우 무시한다
+        pass
+
+
 def perform_cloudfront_cleanup(session, log: list) -> dict:
-    """CloudFront 배포를 비활성화하고 삭제한다.
-    Enabled 상태인 배포는 먼저 비활성화 요청을 보내고, Disabled 상태인 것만 즉시 삭제한다."""
+    """CloudFront 배포의 모니터링 구독을 해지하고, 비활성화한 뒤 삭제한다.
+    Enabled 상태인 배포는 먼저 비활성화 요청을 보내고, Disabled 상태인 것만 즉시 삭제한다.
+    배포 삭제 전 모니터링 구독(무료 플랜 → pay-as-you-go)을 먼저 해지해야
+    삭제가 정상 진행되고 이후 비용도 발생하지 않는다."""
     cf = session.client("cloudfront")
     result: dict = {"deleted": [], "disabled": [], "skipped": [], "failed": []}
     try:
@@ -29,6 +50,8 @@ def perform_cloudfront_cleanup(session, log: list) -> dict:
             log.append(f"  [CloudFront 정리] 배포 진행 중 — 스킵: {dist_id}")
             result["skipped"].append(dist_id)
             continue
+        # 모니터링 구독(실시간 메트릭 플랜)을 먼저 해지한다 — 구독이 없으면 자동으로 무시됨
+        _cancel_monitoring_subscription(cf, dist_id, log)
         if enabled:
             try:
                 cfg_resp = cf.get_distribution_config(Id=dist_id)
@@ -47,8 +70,19 @@ def perform_cloudfront_cleanup(session, log: list) -> dict:
                 log.append(f"  [CloudFront 정리] 삭제 완료: {dist_id} ({domain})")
                 result["deleted"].append(dist_id)
             except ClientError as e:
-                log.append(f"  [CloudFront 정리] 삭제 실패 {dist_id}: {e}")
-                result["failed"].append(dist_id)
+                # Pricing Plan 구독 중인 배포는 플랜 해지 전까지 삭제 불가 —
+                # AWS 정책상 해지 후에도 월 청구 사이클 종료까지 대기가 필요하다
+                if e.response.get("Error", {}).get("Code") == "PreconditionFailed" \
+                        and "pricing plan" in str(e).lower():
+                    log.append(
+                        f"  [CloudFront 정리] ⚠ Pricing Plan 구독으로 인해 삭제 불가: {dist_id} ({domain})\n"
+                        f"    → AWS Console > CloudFront > 해당 배포 > Billing > Manage plan 에서 플랜을 해지하세요.\n"
+                        f"    → 해지 후 이번 달 말(청구 사이클 종료) 이후 awsw clean 을 다시 실행하면 삭제됩니다."
+                    )
+                    result["skipped"].append(dist_id)
+                else:
+                    log.append(f"  [CloudFront 정리] 삭제 실패 {dist_id}: {e}")
+                    result["failed"].append(dist_id)
     return result
 
 
