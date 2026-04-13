@@ -80,7 +80,7 @@ resource "aws_security_group" "rds_mysql_sg" {
 resource "aws_db_instance" "wordpress" {
   identifier           = "wordpressdb"
   allocated_storage    = 20
-  storage_type         = "gp2"
+  storage_type         = "gp3" # gp2보다 성능이 좋고 비용이 저렴한 최신 스토리지 타입
   engine               = "mysql"
   engine_version       = "8.0"
   instance_class       = "db.t3.micro"
@@ -103,8 +103,11 @@ resource "aws_efs_file_system" "wordpress_efs" {
   }
 }
 
+# EFS(공유 파일 스토리지)에 대한 NFS 접근을 제어하는 보안 그룹
 resource "aws_security_group" "efs_sg" {
-  vpc_id = module.vpc.vpc_id
+  name        = "efs-security-group"
+  description = "Security group for EFS mount targets - allows NFS(2049) from internal VPC"
+  vpc_id      = module.vpc.vpc_id
   ingress {
     description = "Allow NFS access from within VPC"
     from_port   = 2049
@@ -132,18 +135,42 @@ resource "aws_efs_mount_target" "efs_mount" {
   security_groups = [aws_security_group.efs_sg.id]
 }
 
-# 빌더를 실행한다.
-resource "null_resource" "packer_build" {
+# Packer를 사용해 WordPress가 설치된 EC2 AMI(머신 이미지)를 빌드하는 리소스
+# terraform_data는 null_resource를 대체하는 최신 방식 (Terraform 1.4.0+)
+resource "terraform_data" "packer_build" {
   provisioner "local-exec" {
+    # AWS_PROFILE을 명시적으로 지정하여 Packer가 올바른 자격증명을 사용하도록 설정
+    # (Packer는 기본적으로 default 프로파일을 사용하므로 반드시 명시 필요)
+    environment = {
+      AWS_PROFILE = "my-profile"
+    }
     command = <<-EOT
-      packer build -var subnet_id=${module.vpc.public_subnets[0]} -var db_username=${var.db_username} -var db_password=${var.db_password} -var efs_domain=${aws_efs_file_system.wordpress_efs.dns_name} -var rds_domain=${aws_db_instance.wordpress.address} al2023-wp-ami.pkr.hcl
+      packer build \
+        -force \
+        -var "subnet_id=${module.vpc.public_subnets[0]}" \
+        -var "db_username=${var.db_username}" \
+        -var "db_password=${var.db_password}" \
+        -var "efs_domain=${aws_efs_file_system.wordpress_efs.dns_name}" \
+        -var "rds_domain=${aws_db_instance.wordpress.address}" \
+        al2023-wp-ami.pkr.hcl
     EOT
   }
 
-  # triggers = {
-  #   always_run = "${timestamp()}"
-  # }
-
+  # RDS와 EFS 마운트 타겟이 완전히 준비된 후 Packer 빌드 시작
   depends_on = [aws_efs_mount_target.efs_mount, aws_db_instance.wordpress]
+}
+
+# Packer가 빌드한 WordPress AMI를 동적으로 조회 (하드코딩 방지)
+# depends_on을 사용해 Packer 빌드 완료 후에 AMI를 검색
+data "aws_ami" "wordpress" {
+  most_recent = true  # 가장 최근에 빌드된 AMI를 선택
+  owners      = ["self"] # 내 계정에서 빌드한 AMI만 검색
+
+  filter {
+    name   = "name"
+    values = ["wordpress-al2023-*"] # Packer가 생성한 AMI 이름 패턴으로 필터링
+  }
+
+  depends_on = [terraform_data.packer_build] # Packer 빌드가 끝난 후 AMI 조회
 }
 

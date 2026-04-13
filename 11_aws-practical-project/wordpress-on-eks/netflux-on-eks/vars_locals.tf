@@ -23,44 +23,44 @@ variable "app_name" {
 # S3
 # 생성할 S3 버킷의 이름을 지정하는 변수
 variable "bucket_name" {
-  description = "S3 버킷의 이름" # 변수에 대한 설명
-  type        = string      # 변수 타입
+  description = "Name of the S3 bucket for static website hosting"
+  type        = string
   default     = "my-static-website-bucket"
 }
 
-# 인덱스 문서의 이름을 지정하는 변수 (예: index.html)
+# 정적 웹사이트의 기본 진입 파일 (보통 index.html)
 variable "index_document" {
-  description = "인덱스 문서의 이름 (예: index.html)" # 변수에 대한 설명
-  type        = string                       # 변수 타입
-  default     = "index.html"                 # 기본값
+  description = "Name of the index document for the S3 static website (e.g. index.html)"
+  type        = string
+  default     = "index.html"
 }
 
-# 에러 문서의 이름을 지정하는 변수 (예: error.html)
+# 에러 발생 시 반환할 HTML 파일 이름
 variable "error_document" {
-  description = "에러 문서의 이름 (예: error.html)" # 변수에 대한 설명
-  type        = string                      # 변수 타입
-  default     = "error.html"                # 기본값
+  description = "Name of the error document for the S3 static website (e.g. error.html)"
+  type        = string
+  default     = "error.html"
 }
 
 # 로컬에서 업로드할 인덱스 문서 파일의 경로를 지정하는 변수
 variable "index_document_path" {
-  description = "로컬 인덱스 문서 파일의 경로" # 변수에 대한 설명
-  type        = string             # 변수 타입
+  description = "Local path to the index HTML file to upload to S3"
+  type        = string
   default     = "./html/index.html"
 }
 
 # 로컬에서 업로드할 에러 문서 파일의 경로를 지정하는 변수
 variable "error_document_path" {
-  description = "로컬 에러 문서 파일의 경로" # 변수에 대한 설명
-  type        = string            # 변수 타입
+  description = "Local path to the error HTML file to upload to S3"
+  type        = string
   default     = "./html/error.html"
 }
 
-# S3 버킷에 적용할 환경 태그를 지정하는 변수 (예: dev, prod)
+# 리소스 환경 구분 태그 (dev, staging, prod 등)
 variable "environment" {
-  description = "버킷의 환경 태그 (예: dev, prod)" # 변수에 대한 설명
-  type        = string                     # 변수 타입
-  default     = "dev"                      # 기본값
+  description = "Environment tag applied to all resources (e.g. dev, staging, prod)"
+  type        = string
+  default     = "dev"
 }
 
 ### locals

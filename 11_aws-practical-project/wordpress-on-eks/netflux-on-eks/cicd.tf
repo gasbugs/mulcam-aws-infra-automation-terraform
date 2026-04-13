@@ -24,7 +24,7 @@ resource "aws_ecr_repository" "ecr_repo" {
 # CodePipeline에 사용될 IAM 역할 정의
 resource "aws_iam_role" "code_pipeline_role" {
   name        = "${local.name}-${random_integer.unique_id.result}"
-  description = "Role to be used by CodePipeline"
+  description = "IAM role for CodePipeline, CodeBuild, and CloudWatch Events"
   tags        = local.tags
 
   assume_role_policy = <<EOF
@@ -51,7 +51,7 @@ EOF
 # CodePipeline에서 사용할 사용자 정의 정책
 resource "aws_iam_policy" "this" {
   name        = local.name
-  description = "Custom policies for CI"
+  description = "Custom IAM policy for CI/CD pipeline (CodeBuild, CodePipeline, ECR, S3, CloudWatch)"
   tags        = local.tags
 
   policy = <<EOF
@@ -211,7 +211,7 @@ resource "aws_codebuild_project" "this_ci" {
 # CodeBuild에 대한 보안 그룹 생성
 resource "aws_security_group" "codebuild_sg" {
   name        = "codebuild-security-group"
-  description = "Security group for Code Build"
+  description = "Security group for CodeBuild project running inside VPC"
   vpc_id      = module.vpc.vpc_id # 사용할 VPC ID
 
   ingress {
@@ -310,8 +310,8 @@ resource "aws_codepipeline_webhook" "github_webhook" {
   }
 
   filter {
-    json_path    = "$.ref"             # 브랜치 참조 경로
-    match_equals = "refs/heads/master" # master 브랜치에서만 트리거
+    json_path    = "$.ref"           # 브랜치 참조 경로
+    match_equals = "refs/heads/main" # main 브랜치에서만 트리거 (CodePipeline 소스 브랜치와 일치)
   }
 }
 

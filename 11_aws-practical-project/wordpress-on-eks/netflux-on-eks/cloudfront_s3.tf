@@ -18,7 +18,7 @@ resource "aws_cloudfront_distribution" "s3_distribution" {
 
   # CLB 오리진 추가
   origin {
-    domain_name = data.kubernetes_service.netflux_svc.status.0.load_balancer.0.ingress.0.hostname
+    domain_name = data.kubernetes_service_v1.netflux_svc.status.0.load_balancer.0.ingress.0.hostname
     origin_id   = "EKS-CLB"
     custom_origin_config {
       http_port              = 80

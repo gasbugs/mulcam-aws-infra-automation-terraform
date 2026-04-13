@@ -91,7 +91,8 @@ build {
       "sudo wp core download --allow-root",
       "echo sudo wp config create --dbname=wordpressdb --dbuser=$DB_USERNAME --dbpass=$DB_PASSWORD --dbhost=$RDS_DOMAIN --allow-root", 
       "sudo wp config create --dbname=wordpressdb --dbuser=$DB_USERNAME --dbpass=$DB_PASSWORD --dbhost=$RDS_DOMAIN --allow-root",
-      "wp core install --url=example.com --title='My Site' --admin_user=admin --admin_password=password --admin_email=admin@example.com",
+      # WordPress 데이터베이스 초기화 및 기본 관리자 계정 생성 (--allow-root: root 권한으로 실행 허용)
+      "sudo wp core install --url=example.com --title='My WordPress Site' --admin_user=admin --admin_password=Admin1234! --admin_email=admin@example.com --allow-root",
       "sudo chown -R apache:apache /var/www/html"
     ]
   }
