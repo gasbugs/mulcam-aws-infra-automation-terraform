@@ -140,6 +140,15 @@ terraform apply -auto-approve
 
 ### 배포 후 추가 설정
 
+**CodeCommit HTTPS 자격증명 설정** (최초 1회):
+```bash
+git config --global credential.helper \
+  '!aws --profile my-profile codecommit credential-helper $@'
+git config --global credential.UseHttpPath true
+```
+> osxkeychain 등 기존 credential.helper가 있으면 위 설정이 무시될 수 있습니다.
+> 그 경우 아래와 같이 저장소별로 직접 지정하세요.
+
 **netflux-app 소스 코드를 CodeCommit에 push**:
 ```bash
 # terraform output으로 CodeCommit 저장소 주소 확인
@@ -147,11 +156,15 @@ terraform output netflux_app_codecommit_url
 
 # netflux-app 디렉터리를 CodeCommit에 push
 cd ../netflux-app
-git init
+git init -b main
 git add .
 git commit -m "initial commit"
 git remote add origin <netflux_app_codecommit_url>
-git push -u origin main
+# osxkeychain 등 기존 helper를 무력화하고 AWS CodeCommit helper만 사용
+git -c credential.helper="" \
+    -c "credential.helper=!aws --profile my-profile codecommit credential-helper \$@" \
+    -c credential.UseHttpPath=true \
+    push -u origin main
 ```
 > push가 완료되면 EventBridge가 감지하여 CodePipeline이 자동으로 실행됩니다.
 
@@ -159,11 +172,14 @@ git push -u origin main
 ```bash
 # netflux-deploy 디렉터리를 CodeCommit에 push (ArgoCD가 이 저장소를 감시)
 cd ../netflux-deploy
-git init
+git init -b main
 git add .
 git commit -m "initial commit"
 git remote add origin <netflux_deploy_codecommit_url>
-git push -u origin main
+git -c credential.helper="" \
+    -c "credential.helper=!aws --profile my-profile codecommit credential-helper \$@" \
+    -c credential.UseHttpPath=true \
+    push -u origin main
 ```
 
 **실패한 파이프라인 재시작**:

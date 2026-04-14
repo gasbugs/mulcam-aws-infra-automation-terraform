@@ -4,7 +4,8 @@ resource "kubernetes_namespace_v1" "netflux" {
   metadata {
     name = "netflux"
   }
-  # exec 방식 provider는 EKS 클러스터 output을 직접 참조하므로 별도 depends_on 불필요
+  # module.eks 완료(time_sleep 30s 포함) 후 생성 — access entry 전파 대기를 위해 필수
+  depends_on = [module.eks]
 }
 
 # Kubernetes 서비스: 외부에서 netflux 파드에 접근할 수 있도록 로드밸런서 생성
