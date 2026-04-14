@@ -63,7 +63,7 @@ module "eks" {
 
   # 클러스터 이름과 버전 설정
   name               = local.cluster_name # 로컬에서 정의한 클러스터 이름 사용
-  kubernetes_version = "1.35"             # EKS 클러스터의 버전 설정 (최신 안정 버전으로 업데이트)
+  kubernetes_version = var.kubernetes_version             # EKS 클러스터의 버전 설정 (최신 안정 버전으로 업데이트)
 
   endpoint_public_access                   = false # 클러스터의 퍼블릭 엔드포인트 접근을 허용
   enable_cluster_creator_admin_permissions = true  # 클러스터 생성자에게 관리 권한 부여
@@ -131,6 +131,7 @@ module "eks_managed_node_groups" {
 
   name                 = "on_demand"                     # 첫 번째 노드 그룹 이름
   cluster_name         = module.eks.cluster_name         # EKS 클러스터 이름
+  kubernetes_version   = module.eks.cluster_version      # 클러스터와 노드 그룹 버전 일치 (업그레이드 시 컨트롤 플레인 버전 자동 추적)
   cluster_service_cidr = module.eks.cluster_service_cidr # 클러스터 서비스 CIDR
   subnet_ids           = module.vpc.private_subnets      # 사설 서브넷 ID
 

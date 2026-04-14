@@ -4,7 +4,7 @@ module "eks" {
   version = "21.8"
 
   name               = local.cluster_name
-  kubernetes_version = "1.35"
+  kubernetes_version = var.kubernetes_version
 
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
@@ -32,6 +32,7 @@ module "eks_managed_node_groups" {
 
   name                 = "on_demand"
   cluster_name         = module.eks.cluster_name
+  kubernetes_version   = module.eks.cluster_version      # 클러스터와 노드 그룹 버전 일치 (업그레이드 시 컨트롤 플레인 버전 자동 추적)
   cluster_service_cidr = module.eks.cluster_service_cidr
   subnet_ids           = module.vpc.private_subnets
 
