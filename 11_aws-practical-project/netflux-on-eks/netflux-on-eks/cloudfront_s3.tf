@@ -111,7 +111,9 @@ resource "aws_s3_bucket_website_configuration" "static_site_website" {
 resource "aws_s3_object" "static_files" {
   for_each = fileset("./static/", "**/*")
   bucket   = aws_s3_bucket.static_site.id
-  key      = each.value
+  # 앱이 이미지를 'static/파일명.jpg' 경로로 요청하므로
+  # S3에도 동일한 'static/' 접두사를 붙여 저장해야 CloudFront가 올바르게 라우팅함
+  key      = "static/${each.value}"
   source   = "./static/${each.value}"
   etag     = filemd5("./static/${each.value}")
 }

@@ -1,0 +1,567 @@
+{
+  "schema_version": "1.0",
+  "project": "mulcam-aws-infra-automation-terraform",
+  "last_updated": "2026-04-14",
+  "features": [
+    {
+      "id": "feat-001",
+      "name": "01 / terraform-project",
+      "description": "AWS Terraform 기본 프로젝트 — EC2 인스턴스 생성 및 프로바이더 설정",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: terraform plan 성공 / 경로: 01_aws-terraform-overview/terraform-project"
+    },
+    {
+      "id": "feat-002",
+      "name": "02 / HCL-Exercises",
+      "description": "HCL 기초 실습 — 변수, 출력, 기본 문법 연습",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: terraform validate 성공 / 경로: 02_HCL/HCL-Exercises"
+    },
+    {
+      "id": "feat-003",
+      "name": "02 / terraform-built-in-function",
+      "description": "Terraform 내장 함수 활용 — concat, lookup, format 등",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: terraform plan 성공 / 경로: 02_HCL/terraform-built-in-function"
+    },
+    {
+      "id": "feat-004",
+      "name": "02 / terraform-data-types",
+      "description": "Terraform 데이터 타입 — string, number, bool, list, map, object",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: terraform validate 성공 / 경로: 02_HCL/terraform-data-types"
+    },
+    {
+      "id": "feat-005",
+      "name": "02 / terraform-flow-control",
+      "description": "Terraform 흐름 제어 — count, for_each, dynamic 블록",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: terraform plan 성공 / 경로: 02_HCL/terraform-flow-control"
+    },
+    {
+      "id": "feat-006",
+      "name": "02 / terraform-loops",
+      "description": "Terraform 반복문 — for 표현식, for_each, count 패턴",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: terraform plan 성공 / 경로: 02_HCL/terraform-loops"
+    },
+    {
+      "id": "feat-007",
+      "name": "02 / terraform-module",
+      "description": "Terraform 모듈 — 재사용 가능한 모듈 작성 및 호출",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: terraform plan 성공 / 경로: 02_HCL/terraform-module"
+    },
+    {
+      "id": "feat-008",
+      "name": "02 / terraform-resource-flow-management-lifecycle-depends-on",
+      "description": "리소스 생명주기 관리 — lifecycle, depends_on, create_before_destroy",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: terraform plan 성공 / 경로: 02_HCL/terraform-resource-flow-management-lifecycle-depends-on"
+    },
+    {
+      "id": "feat-009",
+      "name": "02 / understanding-terraform-blocks",
+      "description": "Terraform 블록 이해 — terraform, provider, resource, data, variable, output",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: terraform validate 성공 / 경로: 02_HCL/understanding-terraform-blocks"
+    },
+    {
+      "id": "feat-010",
+      "name": "03 / ec2-practice",
+      "description": "EC2 실습 — 인스턴스 생성, 보안 그룹, 키 페어 설정",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: terraform apply 후 EC2 접속 확인 / 경로: 03_terraform-aws-config/ec2-practice"
+    },
+    {
+      "id": "feat-011",
+      "name": "03 / in-place-update-and-replace",
+      "description": "인플레이스 업데이트 vs 교체 — 리소스 변경 동작 이해",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: terraform plan 변경 감지 확인 / 경로: 03_terraform-aws-config/in-place-update-and-replace"
+    },
+    {
+      "id": "feat-012",
+      "name": "03 / managing-tfstate-file",
+      "description": "tfstate 파일 관리 — S3 원격 백엔드, 상태 잠금(DynamoDB)",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: S3 백엔드 init 성공 / 경로: 03_terraform-aws-config/managing-tfstate-file"
+    },
+    {
+      "id": "feat-013",
+      "name": "03 / understanding-vpc-and-ec2-management-with-terraform",
+      "description": "VPC + EC2 관리 — 서브넷, 라우팅 테이블, IGW, EC2 통합 구성",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: terraform apply 후 EC2 인터넷 통신 확인 / 경로: 03_terraform-aws-config/understanding-vpc-and-ec2-management-with-terraform"
+    },
+    {
+      "id": "feat-014",
+      "name": "03 / vpc-module-complete",
+      "description": "VPC 모듈 완성 — terraform-aws-modules/vpc 공개 모듈 활용",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: terraform apply 후 VPC 생성 확인 / 경로: 03_terraform-aws-config/vpc-module-complete"
+    },
+    {
+      "id": "feat-015",
+      "name": "04 / api-service-implementation-using-lambda",
+      "description": "Lambda API 서비스 — API Gateway + Lambda 서버리스 API 구현",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: API 엔드포인트 호출 성공 / 경로: 04_aws-serverless-services-using-terraform/api-service-implementation-using-lambda"
+    },
+    {
+      "id": "feat-016",
+      "name": "04 / cloudfront-s3",
+      "description": "CloudFront + S3 — 정적 웹 호스팅 CDN 배포",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: CloudFront URL 접속 성공 / 경로: 04_aws-serverless-services-using-terraform/cloudfront-s3"
+    },
+    {
+      "id": "feat-017",
+      "name": "04 / cloudfront-s3-modules",
+      "description": "CloudFront + S3 모듈화 — 재사용 가능한 모듈 구조로 CDN 구성",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: terraform apply 성공 / 경로: 04_aws-serverless-services-using-terraform/cloudfront-s3-modules"
+    },
+    {
+      "id": "feat-018",
+      "name": "04 / cloudfront-waf-s3-modules",
+      "description": "CloudFront + WAF + S3 — WAF 보안 정책 적용 CDN 구성",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: terraform apply 성공 / 경로: 04_aws-serverless-services-using-terraform/cloudfront-waf-s3-modules"
+    },
+    {
+      "id": "feat-019",
+      "name": "04 / route53_with_ec2",
+      "description": "Route53 + EC2 — 커스텀 도메인으로 EC2 서비스 연결",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 도메인 DNS 해석 확인 / 경로: 04_aws-serverless-services-using-terraform/route53_with_ec2"
+    },
+    {
+      "id": "feat-020",
+      "name": "04 / route53-cloudfront-s3-modules",
+      "description": "Route53 + CloudFront + S3 — 커스텀 도메인 정적 웹사이트 완성형",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 커스텀 도메인 접속 성공 / 경로: 04_aws-serverless-services-using-terraform/route53-cloudfront-s3-modules"
+    },
+    {
+      "id": "feat-021",
+      "name": "04 / serverless-practice",
+      "description": "서버리스 실습 — Lambda, API Gateway 기본 패턴 연습",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: Lambda 함수 호출 성공 / 경로: 04_aws-serverless-services-using-terraform/serverless-practice"
+    },
+    {
+      "id": "feat-022",
+      "name": "04 / static-website-hosting-using-s3",
+      "description": "S3 정적 웹 호스팅 — S3 버킷 웹사이트 기능 활성화",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: S3 웹사이트 URL 접속 성공 / 경로: 04_aws-serverless-services-using-terraform/static-website-hosting-using-s3"
+    },
+    {
+      "id": "feat-023",
+      "name": "05 / asg-elb-infra",
+      "description": "ASG + ALB 인프라 — 오토스케일링 그룹과 로드밸런서 기본 구성",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: ALB DNS 접속 성공 / 경로: 05_elb-asg-terraform/asg-elb-infra"
+    },
+    {
+      "id": "feat-024",
+      "name": "05 / asg-elb-infra-ssl",
+      "description": "ASG + ALB + SSL — ACM 인증서 적용 HTTPS 구성",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: HTTPS 접속 성공 / 경로: 05_elb-asg-terraform/asg-elb-infra-ssl"
+    },
+    {
+      "id": "feat-025",
+      "name": "05 / asg-elb-infra-with-tag",
+      "description": "ASG + ALB + 태그 관리 — 리소스 태깅 전략 적용",
+      "priority": "low",
+      "passes": false,
+      "notes": "검증 방법: terraform apply 성공 / 경로: 05_elb-asg-terraform/asg-elb-infra-with-tag"
+    },
+    {
+      "id": "feat-026",
+      "name": "05 / aws-resource-tag-basics",
+      "description": "AWS 리소스 태그 기초 — 태그 정책 및 비용 추적 설정",
+      "priority": "low",
+      "passes": false,
+      "notes": "검증 방법: terraform apply 성공 / 경로: 05_elb-asg-terraform/aws-resource-tag-basics"
+    },
+    {
+      "id": "feat-027",
+      "name": "05 / image-builder",
+      "description": "EC2 Image Builder — 자동화된 AMI 빌드 파이프라인 구성",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 이미지 빌드 파이프라인 실행 성공 / 경로: 05_elb-asg-terraform/image-builder"
+    },
+    {
+      "id": "feat-028",
+      "name": "05 / packer-ami",
+      "description": "Packer AMI 빌드 — Packer로 커스텀 AMI 생성",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: packer build 성공 / 경로: 05_elb-asg-terraform/packer-ami"
+    },
+    {
+      "id": "feat-029",
+      "name": "05 / packer-asg-practice",
+      "description": "Packer AMI + ASG 실습 — 커스텀 AMI 기반 오토스케일링 배포",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: ASG 인스턴스 기동 확인 / 경로: 05_elb-asg-terraform/packer-asg-practice"
+    },
+    {
+      "id": "feat-030",
+      "name": "05 / packer-for-javaspring",
+      "description": "Java Spring Boot AMI — Docker 빌드 후 Packer로 AMI 베이킹",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: build_and_pack.sh 실행 성공 / 경로: 05_elb-asg-terraform/packer-for-javaspring"
+    },
+    {
+      "id": "feat-031",
+      "name": "05 / spring-app-ec2",
+      "description": "Spring App EC2 배포 — 커스텀 AMI 기반 EC2 애플리케이션 배포",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 앱 HTTP 응답 확인 / 경로: 05_elb-asg-terraform/spring-app-ec2"
+    },
+    {
+      "id": "feat-032",
+      "name": "05 / updating-asg",
+      "description": "ASG 롤링 업데이트 — Launch Template 버전 관리 및 무중단 배포",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 업데이트 후 서비스 연속성 확인 / 경로: 05_elb-asg-terraform/updating-asg"
+    },
+    {
+      "id": "feat-033",
+      "name": "06 / aurora-mysql-service",
+      "description": "Aurora MySQL 서비스 — Aurora 클러스터 생성 및 기본 설정",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: DB 접속 성공 / 경로: 06_db-service-management/aurora-mysql-service"
+    },
+    {
+      "id": "feat-034",
+      "name": "06 / aurora-mysql-service-and-take-snapshot",
+      "description": "Aurora 스냅샷 생성 — 수동 스냅샷 생성 및 관리",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 스냅샷 생성 확인 / 경로: 06_db-service-management/aurora-mysql-service-and-take-snapshot"
+    },
+    {
+      "id": "feat-035",
+      "name": "06 / aurora-mysql-service-from-snapshot",
+      "description": "Aurora 스냅샷 복원 — 스냅샷에서 새 클러스터 복원",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 복원된 DB 접속 성공 / 경로: 06_db-service-management/aurora-mysql-service-from-snapshot"
+    },
+    {
+      "id": "feat-036",
+      "name": "06 / aurora-mysql-service-upgrade",
+      "description": "Aurora 버전 업그레이드 — 마이너/메이저 버전 업그레이드 절차",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 업그레이드 완료 후 DB 접속 확인 / 경로: 06_db-service-management/aurora-mysql-service-upgrade"
+    },
+    {
+      "id": "feat-037",
+      "name": "06 / db-practice",
+      "description": "DB 실습 — RDS 기본 생성 및 연결 연습",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: DB 연결 성공 / 경로: 06_db-service-management/db-practice"
+    },
+    {
+      "id": "feat-038",
+      "name": "06 / dynamodb-service",
+      "description": "DynamoDB 서비스 — 테이블 생성, GSI, 기본 CRUD",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 아이템 읽기/쓰기 성공 / 경로: 06_db-service-management/dynamodb-service"
+    },
+    {
+      "id": "feat-039",
+      "name": "06 / dynamodb-service-pitr",
+      "description": "DynamoDB PITR — 특정 시점 복구(Point-in-Time Recovery) 설정",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: PITR 활성화 확인 / 경로: 06_db-service-management/dynamodb-service-pitr"
+    },
+    {
+      "id": "feat-040",
+      "name": "06 / rds-mysql-service",
+      "description": "RDS MySQL 서비스 — 단일 인스턴스 RDS 생성 및 파라미터 그룹",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: MySQL 접속 성공 / 경로: 06_db-service-management/rds-mysql-service"
+    },
+    {
+      "id": "feat-041",
+      "name": "06 / valkey-oss-connection",
+      "description": "Valkey(ElastiCache Redis OSS) 연결 — 캐시 클러스터 생성 및 접속",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: Redis CLI 연결 성공 / 경로: 06_db-service-management/valkey-oss-connection"
+    },
+    {
+      "id": "feat-042",
+      "name": "06 / valkey-oss-snapshot-upgrade",
+      "description": "Valkey 스냅샷 및 업그레이드 — 백업 및 버전 업그레이드 절차",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 업그레이드 후 연결 성공 / 경로: 06_db-service-management/valkey-oss-snapshot-upgrade"
+    },
+    {
+      "id": "feat-043",
+      "name": "07 / ec2-for-secret-manager",
+      "description": "EC2 + Secrets Manager — EC2에서 Secrets Manager 시크릿 조회",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: EC2에서 시크릿 읽기 성공 / 경로: 07_aws-access-control-and-secret-management/ec2-for-secret-manager"
+    },
+    {
+      "id": "feat-044",
+      "name": "07 / iam-practice",
+      "description": "IAM 실습 — 사용자, 그룹, 역할, 정책 기본 구성",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: IAM 권한 테스트 성공 / 경로: 07_aws-access-control-and-secret-management/iam-practice"
+    },
+    {
+      "id": "feat-045",
+      "name": "07 / kms-secret-manager-practice",
+      "description": "KMS + Secrets Manager 실습 — CMK 암호화 시크릿 생성 및 관리",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 시크릿 암호화/복호화 성공 / 경로: 07_aws-access-control-and-secret-management/kms-secret-manager-practice"
+    },
+    {
+      "id": "feat-046",
+      "name": "07 / managing-kms-with-terraform",
+      "description": "KMS 키 관리 — CMK 생성, 키 정책, 키 로테이션 설정",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: KMS 키 생성 및 암호화 테스트 성공 / 경로: 07_aws-access-control-and-secret-management/managing-kms-with-terraform"
+    },
+    {
+      "id": "feat-047",
+      "name": "07 / managing-secrets-manager-with-terraform",
+      "description": "Secrets Manager 관리 — 시크릿 생성, 버전 관리, 자동 로테이션",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 시크릿 조회 성공 / 경로: 07_aws-access-control-and-secret-management/managing-secrets-manager-with-terraform"
+    },
+    {
+      "id": "feat-048",
+      "name": "07 / policy-management-using-terraform",
+      "description": "IAM 정책 관리 — 인라인 정책, 관리형 정책 생성 및 연결",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: terraform apply 성공 / 경로: 07_aws-access-control-and-secret-management/policy-management-using-terraform"
+    },
+    {
+      "id": "feat-049",
+      "name": "07 / terraform-iam-identity-center",
+      "description": "IAM Identity Center — SSO 권한 셋 및 계정 할당 관리",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: SSO 로그인 성공 / 경로: 07_aws-access-control-and-secret-management/terraform-iam-identity-center"
+    },
+    {
+      "id": "feat-050",
+      "name": "07 / user-creation-using-terraform",
+      "description": "IAM 사용자 생성 — 프로그래밍 방식 및 콘솔 접근 사용자 생성",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 사용자 생성 및 로그인 성공 / 경로: 07_aws-access-control-and-secret-management/user-creation-using-terraform"
+    },
+    {
+      "id": "feat-051",
+      "name": "08 / docker-basics",
+      "description": "Docker 기초 — 컨테이너 빌드, 실행, 이미지 관리 기본",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: Docker 컨테이너 실행 성공 / 경로: 08_ecs-cluster-mgmt/docker-basics"
+    },
+    {
+      "id": "feat-052",
+      "name": "08 / ecr-pull-through-cache",
+      "description": "ECR Pull-Through Cache — 외부 레지스트리 캐싱 설정",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 캐시 이미지 Pull 성공 / 경로: 08_ecs-cluster-mgmt/ecr-pull-through-cache"
+    },
+    {
+      "id": "feat-053",
+      "name": "08 / ecs-cluster-mgmt",
+      "description": "ECS 클러스터 관리 — Fargate 서비스, 태스크 정의, ALB 연동",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: ECS 서비스 정상 실행 확인 / 경로: 08_ecs-cluster-mgmt/ecs-cluster-mgmt"
+    },
+    {
+      "id": "feat-054",
+      "name": "08 / ecs-practice",
+      "description": "ECS 실습 — 기본 ECS 태스크 및 서비스 배포 연습",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 태스크 실행 성공 / 경로: 08_ecs-cluster-mgmt/ecs-practice"
+    },
+    {
+      "id": "feat-055",
+      "name": "09 / eks-cluster-practice",
+      "description": "EKS 클러스터 실습 — 기본 EKS 클러스터 생성 연습",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: kubectl get nodes 성공 / 경로: 09_eks-cluster-mgmt/eks-cluster-practice"
+    },
+    {
+      "id": "feat-056",
+      "name": "09 / eks-cluster-with-addons",
+      "description": "EKS 애드온 — CoreDNS, kube-proxy, VPC CNI 애드온 관리",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 애드온 상태 정상 확인 / 경로: 09_eks-cluster-mgmt/eks-cluster-with-addons"
+    },
+    {
+      "id": "feat-057",
+      "name": "09 / eks-cluster-with-autoscaler",
+      "description": "EKS Cluster Autoscaler — 노드 자동 스케일링 설정",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 스케일아웃/인 동작 확인 / 경로: 09_eks-cluster-mgmt/eks-cluster-with-autoscaler"
+    },
+    {
+      "id": "feat-058",
+      "name": "09 / eks-cluster-with-custom-vpc",
+      "description": "EKS + 커스텀 VPC — 직접 구성한 VPC에 EKS 배포",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: kubectl 통신 성공 / 경로: 09_eks-cluster-mgmt/eks-cluster-with-custom-vpc"
+    },
+    {
+      "id": "feat-059",
+      "name": "09 / eks-cluster-with-fargate",
+      "description": "EKS Fargate — 서버리스 노드로 EKS 파드 실행",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: Fargate 파드 실행 성공 / 경로: 09_eks-cluster-mgmt/eks-cluster-with-fargate"
+    },
+    {
+      "id": "feat-060",
+      "name": "09 / eks-cluster-with-irsa",
+      "description": "EKS IRSA — 파드에 IAM 역할 직접 할당(IRSA) 구성",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 파드에서 AWS API 호출 성공 / 경로: 09_eks-cluster-mgmt/eks-cluster-with-irsa"
+    },
+    {
+      "id": "feat-061",
+      "name": "09 / eks-cluster-with-karpenter",
+      "description": "EKS Karpenter — 차세대 노드 자동 프로비저닝 설정",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: Karpenter 노드 프로비저닝 성공 / 경로: 09_eks-cluster-mgmt/eks-cluster-with-karpenter"
+    },
+    {
+      "id": "feat-062",
+      "name": "09 / eks-cluster-with-spot-node-group",
+      "description": "EKS Spot 노드그룹 — Spot 인스턴스로 비용 최적화",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: Spot 노드 기동 확인 / 경로: 09_eks-cluster-mgmt/eks-cluster-with-spot-node-group"
+    },
+    {
+      "id": "feat-063",
+      "name": "09 / eks-practice",
+      "description": "EKS 기본 실습 — 클러스터 생성 및 앱 배포 기초 연습",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 파드 실행 성공 / 경로: 09_eks-cluster-mgmt/eks-practice"
+    },
+    {
+      "id": "feat-064",
+      "name": "09 / manual-eks-cluster",
+      "description": "수동 EKS 클러스터 — 모듈 없이 EKS 리소스 직접 구성",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: kubectl get nodes 성공 / 경로: 09_eks-cluster-mgmt/manual-eks-cluster"
+    },
+    {
+      "id": "feat-065",
+      "name": "10 / cicd-pipeline",
+      "description": "CI/CD 파이프라인 — CodePipeline + CodeBuild + EKS 배포 자동화",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 파이프라인 실행 성공 / 경로: 10_eks-with-cicd/cicd-pipeline"
+    },
+    {
+      "id": "feat-066",
+      "name": "10 / cicd-pipeline-javaspring",
+      "description": "Java Spring CI/CD — Spring Boot 앱 자동 빌드/배포 파이프라인",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 파이프라인 빌드/배포 성공 / 경로: 10_eks-with-cicd/cicd-pipeline-javaspring"
+    },
+    {
+      "id": "feat-067",
+      "name": "10 / cicd-pipeline-practice",
+      "description": "CI/CD 파이프라인 실습 — 기본 파이프라인 구성 연습",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증 방법: 파이프라인 트리거 성공 / 경로: 10_eks-with-cicd/cicd-pipeline-practice"
+    },
+    {
+      "id": "feat-068",
+      "name": "10 / eks-cluster-with-private-ecr",
+      "description": "EKS + Private ECR — 프라이빗 ECR 이미지로 EKS 파드 배포",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: 프라이빗 이미지 Pull 및 파드 실행 성공 / 경로: 10_eks-with-cicd/eks-cluster-with-private-ecr"
+    },
+    {
+      "id": "feat-069",
+      "name": "11 / wordpress-on-ec2",
+      "description": "WordPress on EC2 — EC2 기반 WordPress 완전 자동화 배포",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: WordPress 관리자 페이지 접속 성공 / 경로: 11_aws-practical-project/wordpress-on-ec2"
+    },
+    {
+      "id": "feat-070",
+      "name": "11 / netflux-on-eks",
+      "description": "Netflux on EKS — EKS 기반 Netflux 컨테이너 배포 및 운영",
+      "priority": "high",
+      "passes": false,
+      "notes": "검증 방법: Netflux 서비스 URL 접속 성공 / 경로: 11_aws-practical-project/netflux-on-eks"
+    }
+  ]
+}

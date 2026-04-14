@@ -16,10 +16,7 @@ variable "aws_profile" {
 
 #########################################
 # cicd
-variable "project_name" {
-  default = "gasbugs/netflux-app"
-}
-
+# CodeCommit 저장소 이름 및 ECR 이미지 이름으로 사용되는 애플리케이션 이름
 variable "app_name" {
   default = "netflux"
 }

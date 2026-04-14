@@ -1,0 +1,38 @@
+version: 0.2
+
+# CodeBuild 빌드 명세 파일
+# YAML 파서 주의사항:
+#   - plain scalar(따옴표 없는 값)에서 ': '(콜론+공백)는 키:값 구분자로 파싱되어 오류 발생
+#   - '${}' 문법도 flow mapping으로 오해할 수 있음
+#   -> 이 두 가지가 포함된 명령은 YAML 쌍따옴표로 전체를 감쌈
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - git config --global credential.helper '!aws codecommit credential-helper $@'
+      - git config --global credential.UseHttpPath true
+      - git config --global user.email codebuild@build.local
+      - git config --global user.name CodeBuild
+
+  build:
+    commands:
+      - echo Building Docker image...
+      - docker build -t $REPOSITORY_URI:latest -t $REPOSITORY_URI:$IMAGE_TAG .
+
+  post_build:
+    commands:
+      - echo Pushing Docker image to ECR...
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - echo Updating deployment manifest...
+      - git clone https://git-codecommit.$AWS_DEFAULT_REGION.amazonaws.com/v1/repos/$DEPLOY_REPO /tmp/deploy
+      - NEW_IMAGE=$REPOSITORY_URI:$IMAGE_TAG
+      # sed 명령 안에 'image: $NEW_IMAGE'(콜론+공백)가 있어 plain scalar로 쓰면 YAML 파서 오류
+      # -> YAML 쌍따옴표로 감싸고, sed 표현식은 쉘 홑따옴표로 감싸서 변수 치환 유지
+      - "sed -i 's|image:.*|image: '\"$NEW_IMAGE\"'|' /tmp/deploy/deployment.yaml"
+      - cd /tmp/deploy && git add deployment.yaml && git commit -m update-$IMAGE_TAG && git push
+      - echo Build complete.
