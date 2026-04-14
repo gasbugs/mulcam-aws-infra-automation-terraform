@@ -115,8 +115,45 @@ Final Test 검증 완료 후 모든 리소스를 destroy했습니다.
 
 ---
 
-## 6. 결론
+## 6. KMS 타이밍 이슈 재검증 (2차 Final Test)
 
-두 프로젝트 모두 **처음부터(fresh state) 단일 `terraform apply`** 로 정상 배포되었으며, 배포된 서비스가 정상 동작함을 스냅샷으로 검증했습니다. 모든 리소스는 Final Test 완료 후 destroy되었습니다.
+1차 Final Test에서 EKS KMS key access denied 오류가 발생하여 동일 apply 재실행으로 해결했습니다.
+사용자 지시에 따라 **destroy 후 3분 대기** 방식이 실제로 문제를 해결하는지 2차 검증을 수행했습니다.
+
+### 2차 Final Test 결과
+
+| 항목 | 결과 |
+|---|---|
+| Destroy 완료 후 대기 | ✅ 3분 대기 (KMS grant 전파 안정화) |
+| `terraform apply` (단일 실행) | ✅ Apply complete! Resources: 125 added (오류 없음) |
+| EKS 클러스터 | ✅ `education-eks-ytkoGj6J` — Kubernetes 1.35.2-eks-f69f56f |
+| 노드 수 | ✅ 2 Ready (`v1.35.2-eks-f69f56f`) |
+| ArgoCD 파드 | ✅ 전체 8개 파드 Running |
+| netflux-svc CLB | ✅ `a9a24bf9652454963b246dca1d413b63-1122960967.us-east-1.elb.amazonaws.com` |
+| CloudFront | ✅ `dv34l5ocdqvj2.cloudfront.net` Deployed |
+
+### 결론: KMS 타이밍 이슈 해결 방법
+
+- **원인**: destroy 후 즉시 re-apply 시 KMS grant 전파 지연으로 EKS 클러스터 생성 실패
+- **해결**: destroy 완료 후 **3분 대기** → 단일 `terraform apply`로 성공
+- **코드 변경 불필요**: `encryption_config = null` 등 KMS 설정 변경 없이 순수 대기로 해결됨
+
+---
+
+## 7. 리소스 최종 정리 (2차 Destroy)
+
+2차 Final Test 검증 완료 후 모든 리소스를 재차 destroy했습니다.
+
+| 프로젝트 | Destroy 결과 |
+|---|---|
+| wordpress-on-eks (netflux-on-eks) 2차 | ✅ Destroy complete |
+
+---
+
+## 8. 결론
+
+두 프로젝트 모두 **처음부터(fresh state) 단일 `terraform apply`** 로 정상 배포되었으며, 배포된 서비스가 정상 동작함을 검증했습니다.
+- KMS 타이밍 이슈는 코드 변경 없이 **3분 대기**로 완전 해결됨이 2차 검증으로 확인됨
+- 모든 리소스는 Final Test 완료 후 destroy되었습니다.
 
 > **신규 스킬**: `~/.claude/skills/eks-terraform-structure/SKILL.md` — EKS Terraform 구조 모범사례 (노드 그룹 분리, addon 분류, exec provider 방식 포함)

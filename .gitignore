@@ -77,3 +77,6 @@ target/
 
 # Git worktree 격리 작업 공간
 .worktrees/
+
+# Packer 빌드 아티팩트 (manifest.json은 빌드 결과물이라 git에 포함하지 않음)
+manifest.json

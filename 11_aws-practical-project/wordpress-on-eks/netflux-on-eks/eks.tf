@@ -8,10 +8,10 @@ module "eks" {
 
   # 클러스터 이름과 버전 설정
   name               = local.cluster_name # 로컬에서 정의한 클러스터 이름 사용
-  kubernetes_version = "1.32"             # AWS EKS 지원 안정 버전 (LTS)
+  kubernetes_version = "1.35"             # AWS EKS 지원 안정 버전 (LTS)
 
-  endpoint_public_access                   = true # 클러스터의 퍼블릭 엔드포인트 접근을 허용
-  enable_cluster_creator_admin_permissions = true # 클러스터 생성자에게 관리 권한 부여
+  endpoint_public_access                   = true  # 클러스터의 퍼블릭 엔드포인트 접근을 허용
+  enable_cluster_creator_admin_permissions = true  # 클러스터 생성자에게 관리 권한 부여
 
   # DaemonSet 기반 애드온만 여기에 포함 — 노드 없이도 ACTIVE 상태로 전환 가능
   # coredns와 aws-ebs-csi-driver는 아래 aws_eks_addon 리소스로 별도 관리
@@ -41,7 +41,6 @@ module "eks_managed_node_groups" {
   cluster_service_cidr = module.eks.cluster_service_cidr # 클러스터 서비스 CIDR
   subnet_ids           = module.vpc.private_subnets      # 사설 서브넷 ID
 
-  kubernetes_version = "1.32"                # 클러스터와 동일한 버전으로 명시 (미지정 시 최신 버전 AMI를 선택해 버전 불일치 오류 발생)
   ami_type           = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
   instance_types     = ["c5.large"]             # 노드 인스턴스 유형
   min_size       = 1                        # 최소 노드 수
