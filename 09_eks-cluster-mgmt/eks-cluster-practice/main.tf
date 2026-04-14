@@ -55,7 +55,7 @@ module "eks" {
   version = "21.8.0"
 
   name               = local.cluster_name
-  kubernetes_version = "1.35"
+  kubernetes_version = var.kubernetes_version
 
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
@@ -131,6 +131,8 @@ resource "aws_eks_node_group" "one" {
   node_group_name = "node-group-1"
   node_role_arn   = aws_iam_role.node_group.arn
   subnet_ids      = module.vpc.private_subnets
+  # 클러스터 버전과 항상 동일하게 유지 — 컨트롤 플레인 업그레이드 시 노드 그룹도 자동으로 따라감
+  version         = module.eks.cluster_version
 
   ami_type       = "AL2023_x86_64_STANDARD"
   instance_types = ["c5.large"]

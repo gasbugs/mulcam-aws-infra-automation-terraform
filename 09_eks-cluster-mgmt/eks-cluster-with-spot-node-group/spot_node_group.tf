@@ -8,6 +8,8 @@ resource "aws_eks_node_group" "on_demand_nodegroup" {
   node_group_name = "on-demand-ng"
   node_role_arn   = aws_iam_role.eks_node_role.arn
   subnet_ids      = module.vpc.private_subnets
+  # 클러스터 버전과 항상 동일하게 유지 — 컨트롤 플레인 업그레이드 시 노드 그룹도 자동으로 따라감
+  version         = module.eks.cluster_version
 
   scaling_config {
     desired_size = 1
@@ -45,6 +47,8 @@ resource "aws_eks_node_group" "spot_nodegroup" {
   node_group_name = "spot-ng"
   node_role_arn   = aws_iam_role.eks_node_role.arn
   subnet_ids      = module.vpc.private_subnets
+  # 클러스터 버전과 항상 동일하게 유지 — 컨트롤 플레인 업그레이드 시 노드 그룹도 자동으로 따라감
+  version         = module.eks.cluster_version
 
   scaling_config {
     desired_size = 2

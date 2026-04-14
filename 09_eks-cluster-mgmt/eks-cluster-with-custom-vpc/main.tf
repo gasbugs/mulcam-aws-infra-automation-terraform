@@ -66,7 +66,7 @@ module "eks" {
 
   # 클러스터 이름과 버전 설정
   name               = local.cluster_name # 로컬에서 정의한 클러스터 이름 사용
-  kubernetes_version = "1.35"             # EKS 클러스터의 버전 설정
+  kubernetes_version = var.kubernetes_version             # EKS 클러스터의 버전 설정
 
   endpoint_public_access                   = true # 클러스터의 퍼블릭 엔드포인트 접근을 허용
   enable_cluster_creator_admin_permissions = true # 클러스터 생성자에게 관리 권한 부여
@@ -126,6 +126,8 @@ resource "aws_eks_node_group" "one" {
   node_group_name = "node-group-1"
   node_role_arn   = aws_iam_role.node_group.arn
   subnet_ids      = module.vpc.private_subnets
+  # 클러스터 버전과 항상 동일하게 유지 — 컨트롤 플레인 업그레이드 시 노드 그룹도 자동으로 따라감
+  version         = module.eks.cluster_version
 
   ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
   instance_types = ["t3.small"]             # 노드 인스턴스 유형
@@ -150,6 +152,8 @@ resource "aws_eks_node_group" "two" {
   node_group_name = "node-group-2"
   node_role_arn   = aws_iam_role.node_group.arn
   subnet_ids      = module.vpc.private_subnets
+  # 클러스터 버전과 항상 동일하게 유지 — 컨트롤 플레인 업그레이드 시 노드 그룹도 자동으로 따라감
+  version         = module.eks.cluster_version
 
   instance_types = ["t3.small"] # 노드 인스턴스 유형
 

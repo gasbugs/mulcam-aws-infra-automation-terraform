@@ -46,7 +46,7 @@ module "eks" {
   version = "21.8.0" # 버전 핀 추가 (재현 가능한 빌드를 위해 항상 버전 고정 권장)
 
   name               = local.name
-  kubernetes_version = "1.35" # 최신 안정 버전으로 업데이트
+  kubernetes_version = var.kubernetes_version # 최신 안정 버전으로 업데이트
 
   # Gives Terraform identity admin access to cluster which will
   # allow deploying resources (Karpenter) into the cluster
@@ -148,13 +148,15 @@ resource "aws_eks_node_group" "karpenter" {
   node_group_name = "karpenter"
   node_role_arn   = aws_iam_role.node_group.arn
   subnet_ids      = module.vpc.private_subnets
+  # 클러스터 버전과 항상 동일하게 유지 — 컨트롤 플레인 업그레이드 시 노드 그룹도 자동으로 따라감
+  version         = module.eks.cluster_version
 
   ami_type       = "AL2023_x86_64_STANDARD"
   instance_types = ["m5.large"]
 
   launch_template {
     id      = aws_launch_template.karpenter_system.id
-    version = aws_launch_template.karpenter_system.latest_version
+    version = aws_launch_template.karpenter_system.latest_version # 런치 템플릿 버전 (Kubernetes 버전과 별개)
   }
 
   scaling_config {

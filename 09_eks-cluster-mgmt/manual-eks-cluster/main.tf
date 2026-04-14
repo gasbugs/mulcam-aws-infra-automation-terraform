@@ -89,7 +89,7 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
 resource "aws_eks_cluster" "main" {
   name     = local.cluster_name
   role_arn = aws_iam_role.eks_cluster.arn
-  version  = "1.34" # 최신 안정 버전으로 업데이트 (1.31 → 1.34)
+  version  = var.kubernetes_version # 최신 안정 버전으로 업데이트 (1.34 → 1.35)
 
   vpc_config {
     subnet_ids              = module.vpc.private_subnets
@@ -138,6 +138,8 @@ resource "aws_eks_node_group" "node_group_1" {
   node_group_name = "node-group-1"
   node_role_arn   = aws_iam_role.eks_node_group.arn
   subnet_ids      = module.vpc.private_subnets
+  # 클러스터 버전과 항상 동일하게 유지 — 컨트롤 플레인 업그레이드 시 노드 그룹도 자동으로 따라감
+  version         = aws_eks_cluster.main.version
 
   scaling_config {
     desired_size = 2
@@ -159,6 +161,8 @@ resource "aws_eks_node_group" "node_group_2" {
   node_group_name = "node-group-2"
   node_role_arn   = aws_iam_role.eks_node_group.arn
   subnet_ids      = module.vpc.private_subnets
+  # 클러스터 버전과 항상 동일하게 유지 — 컨트롤 플레인 업그레이드 시 노드 그룹도 자동으로 따라감
+  version         = aws_eks_cluster.main.version
 
   scaling_config {
     desired_size = 1

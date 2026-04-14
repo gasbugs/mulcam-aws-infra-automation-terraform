@@ -52,7 +52,7 @@ module "eks" {
   version = "21.8.0"
 
   name               = local.cluster_name
-  kubernetes_version = "1.35"
+  kubernetes_version = var.kubernetes_version
 
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
@@ -128,9 +128,9 @@ module "eks_managed_node_groups" {
 
   name                 = "on_demand"                     # 첫 번째 노드 그룹 이름
   cluster_name         = module.eks.cluster_name         # EKS 클러스터 이름
+  kubernetes_version   = module.eks.cluster_version      # 클러스터와 노드 그룹 버전 일치 (업그레이드 시 컨트롤 플레인 버전 자동 추적)
   cluster_service_cidr = module.eks.cluster_service_cidr # 클러스터 서비스 CIDR
   subnet_ids           = module.vpc.private_subnets      # 사설 서브넷 ID
-
 
   ami_type       = "AL2023_x86_64_STANDARD" # Amazon Linux 2023 사용
   instance_types = ["c5.large"]             # 노드 인스턴스 유형
