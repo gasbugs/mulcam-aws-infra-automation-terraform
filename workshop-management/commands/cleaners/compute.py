@@ -210,6 +210,37 @@ def perform_ecs_full_cleanup(session, log: list, regions: list) -> dict:
     return result
 
 
+def perform_ecs_task_def_cleanup(session, log: list, regions: list) -> dict:
+    """클러스터와 무관하게 모든 ACTIVE 태스크 정의를 해제(deregister)한 뒤 완전 삭제한다.
+    ECS 클러스터가 없어도 고아로 남아 있는 태스크 정의를 정리할 때 사용한다."""
+    result: dict = {"deleted": [], "failed": []}
+    for region in regions:
+        try:
+            ecs = session.client("ecs", region_name=region)
+            # 페이지네이터로 ACTIVE 상태의 모든 태스크 정의 ARN을 수집한다
+            paginator = ecs.get_paginator("list_task_definitions")
+            td_arns = []
+            for page in paginator.paginate(status="ACTIVE"):
+                td_arns.extend(page.get("taskDefinitionArns", []))
+
+            for td_arn in td_arns:
+                # ARN 마지막 부분에서 "패밀리:리비전" 형식으로 이름 추출
+                td_name = td_arn.rsplit("/", 1)[-1]
+                try:
+                    # 1단계: ACTIVE → INACTIVE (deregister)
+                    ecs.deregister_task_definition(taskDefinition=td_arn)
+                    # 2단계: INACTIVE 상태를 완전히 삭제 (delete_task_definitions API)
+                    ecs.delete_task_definitions(taskDefinitions=[td_arn])
+                    log.append(f"  [ECS 태스크 정의 정리] 삭제 완료: {td_name} (리전: {region})")
+                    result["deleted"].append(td_name)
+                except ClientError as e:
+                    log.append(f"  [ECS 태스크 정의 정리] 삭제 실패 ({td_name}): {e}")
+                    result["failed"].append(td_name)
+        except (ClientError, BotoCoreError):
+            pass
+    return result
+
+
 def perform_eks_full_cleanup(session, log: list, regions: list) -> dict:
     """EKS 노드 그룹, Fargate 프로파일, 애드온을 삭제한 뒤 클러스터를 제거한다.
     각 단계는 비동기이므로 삭제 완료까지 폴링한다."""

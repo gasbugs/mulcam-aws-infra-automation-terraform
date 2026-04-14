@@ -48,6 +48,8 @@ RESOURCE_CHECKS = {
     "RDS Snapshots":          ("rds",             "regional", "describe_db_snapshots",         "DBSnapshots"),
     "RDS Cluster Snapshots":  ("rds",             "regional", "describe_db_cluster_snapshots", "DBClusterSnapshots"),
     "ECS Clusters":           ("ecs",             "regional", "list_clusters",                 "clusterArns"),
+    # 클러스터 없이 남아 있는 고아 태스크 정의도 별도로 탐지 — 요금은 없지만 감사 목적으로 포함
+    "ECS Task Definitions":   ("ecs",             "regional", "list_task_definitions",          "taskDefinitionArns"),
     "ECR Repos":              ("ecr",             "regional", "describe_repositories",         "repositories"),
     "CodeBuild":              ("codebuild",       "regional", "list_projects",                 "projects"),
     "WAFv2 ACLs (Regional)":  ("wafv2",           "regional", "list_web_acls",                 "WebACLs"),
@@ -294,6 +296,15 @@ def _check_single_service(session, resource_name: str, config: tuple, region: st
                 names = [sg.get("GroupName", sg["GroupId"]) for sg in sgs]
                 return (f"{resource_name} {len(sgs)}개 발견 (리전: {region})"
                         f" → {', '.join(names)}")
+
+        elif resource_name == "ECS Task Definitions":
+            # ACTIVE 상태의 태스크 정의만 탐지 — 이미 deregister된 INACTIVE는 제외
+            td_arns = client.list_task_definitions(status="ACTIVE").get(result_key, [])
+            if td_arns:
+                # ARN에서 패밀리명만 추출 (예: arn:.../netflux:3 → netflux)
+                families = sorted({arn.split("/")[1].rsplit(":", 1)[0] for arn in td_arns})
+                return (f"ECS Task Definitions {len(td_arns)}개 발견 (리전: {region})"
+                        f" → {', '.join(families)}")
 
         else:
             resources = getattr(client, api_call)().get(result_key, [])

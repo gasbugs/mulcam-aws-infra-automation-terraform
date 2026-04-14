@@ -80,3 +80,6 @@ target/
 
 # Packer 빌드 아티팩트 (manifest.json은 빌드 결과물이라 git에 포함하지 않음)
 manifest.json
+
+# 하네스 세션 로그 — 개인 작업 기록이므로 공유하지 않음
+claude-progress.txt

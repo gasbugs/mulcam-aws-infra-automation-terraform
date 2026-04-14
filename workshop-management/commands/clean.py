@@ -27,6 +27,7 @@ from commands.cleaners.compute import (
     perform_ami_cleanup, perform_asg_cleanup,
     perform_ebs_snapshot_cleanup, perform_ebs_volume_cleanup,
     perform_ec2_cleanup, perform_ecs_full_cleanup,
+    perform_ecs_task_def_cleanup,
     perform_eks_full_cleanup, perform_lambda_cleanup,
 )
 from commands.cleaners.database import (
@@ -96,7 +97,7 @@ def _save_clean_history(
         "lambda_cleanup", "apigateway_cleanup", "cloudwatch_cleanup",
         "vpc_cleanup", "imagebuilder_cleanup", "codecommit_cleanup",
         "s3_cleanup", "codepipeline_cleanup", "cw_alarm_cleanup",
-        "ecs_cleanup", "eks_cleanup", "asg_cleanup", "elb_cleanup",
+        "ecs_cleanup", "ecs_task_def_cleanup", "eks_cleanup", "asg_cleanup", "elb_cleanup",
         "rds_cleanup", "elasticache_cleanup", "efs_cleanup",
         "secretsmanager_cleanup", "codebuild_cleanup", "wafv2_cleanup",
         "backup_cleanup", "dynamodb_cleanup", "sns_cleanup", "sqs_cleanup",
@@ -194,7 +195,7 @@ def _delete_account(cred: dict) -> None:
                            "ec2_cleanup": {}, "eip_cleanup": {}, "ebs_cleanup": {}, "vpc_cleanup": {},
                            "imagebuilder_cleanup": {}, "codecommit_cleanup": {}, "s3_cleanup": {},
                            "codepipeline_cleanup": {}, "cw_alarm_cleanup": {},
-                           "ecs_cleanup": {}, "eks_cleanup": {}, "asg_cleanup": {},
+                           "ecs_cleanup": {}, "ecs_task_def_cleanup": {}, "eks_cleanup": {}, "asg_cleanup": {},
                            "elb_cleanup": {}, "rds_cleanup": {}, "elasticache_cleanup": {},
                            "efs_cleanup": {}, "secretsmanager_cleanup": {},
                            "codebuild_cleanup": {}, "wafv2_cleanup": {},
@@ -217,7 +218,9 @@ def _delete_account(cred: dict) -> None:
         "apigateway_cleanup":      _found("API Gateway"),
         "cw_alarm_cleanup":        _found("CloudWatch Alarms"),
         "cloudwatch_cleanup":      _found("CloudWatch"),
-        "ecs_cleanup":             _found("ECS"),
+        "ecs_cleanup":             _found("ECS Clusters"),
+        # 클러스터 없이 태스크 정의만 남은 경우 또는 클러스터 정리 후 잔여 태스크 정의 처리
+        "ecs_task_def_cleanup":    _found("ECS Task Definitions") or _found("ECS Clusters"),
         "ecr_cleanup":             _found("ECR"),
         "eks_cleanup":             _found("EKS"),
         "asg_cleanup":             _found("AutoScalingGroups"),
@@ -260,6 +263,8 @@ def _delete_account(cred: dict) -> None:
         ("cw_alarm_cleanup",        lambda: perform_cloudwatch_alarm_cleanup(session, log, regions), "CloudWatch 알람 삭제 중"),
         ("cloudwatch_cleanup",      lambda: perform_cloudwatch_cleanup(session, log, regions),       "CloudWatch 로그 그룹 삭제 중"),
         ("ecs_cleanup",             lambda: perform_ecs_full_cleanup(session, log, regions),         "ECS 정리 중"),
+        # ECS 클러스터 정리 후 고아 태스크 정의가 남아 있을 수 있으므로 별도 실행
+        ("ecs_task_def_cleanup",    lambda: perform_ecs_task_def_cleanup(session, log, regions),     "ECS 태스크 정의 정리 중"),
         ("eks_cleanup",             lambda: perform_eks_full_cleanup(session, log, regions),         "EKS 정리 중"),
         # ECR은 ECS·EKS가 이미지를 더 이상 참조하지 않는 상태에서 삭제
         ("ecr_cleanup",             lambda: perform_ecr_cleanup(session, log, regions),              "ECR 리포지토리 삭제 중"),
@@ -339,6 +344,8 @@ def _print_delete_summary() -> None:
                             "삭제 실패", _sum("cloudwatch_cleanup",    "failed"),   []),
         ("ECS",             "삭제 완료", _sum("ecs_cleanup",           "deleted"),
                             "삭제 실패", _sum("ecs_cleanup",           "failed"),   []),
+        ("ECS 태스크 정의", "삭제 완료", _sum("ecs_task_def_cleanup",  "deleted"),
+                            "삭제 실패", _sum("ecs_task_def_cleanup",  "failed"),   []),
         ("EKS",             "삭제 완료", _sum("eks_cleanup",           "deleted"),
                             "삭제 실패", _sum("eks_cleanup",           "failed"),   []),
         ("ECR",             "삭제 완료", _sum("ecr_cleanup",           "deleted"),
