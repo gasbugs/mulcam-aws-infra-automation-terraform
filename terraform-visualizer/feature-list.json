@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "project": "terraform-visualizer",
+  "last_updated": "2026-04-16",
+  "features": [
+    {
+      "id": "feat-001",
+      "name": "프로젝트 목록 사이드바",
+      "description": "레포지터리 내 모든 Terraform 프로젝트를 모듈별로 그룹화하여 사이드바에 표시. 검색 필터 및 접기/펼치기 지원.",
+      "priority": "high",
+      "passes": true,
+      "notes": "검증: /api/projects 응답 확인 + 사이드바 렌더링 확인"
+    },
+    {
+      "id": "feat-002",
+      "name": "HCL 파싱 및 리소스 추출",
+      "description": "python-hcl2로 .tf 파일을 파싱하여 resource, data, module, variable, locals 블록 추출. count=0 비활성 리소스 필터링.",
+      "priority": "high",
+      "passes": true,
+      "notes": "검증: /api/project?path=... 응답에서 resources 배열 확인"
+    },
+    {
+      "id": "feat-003",
+      "name": "로컬 모듈 인라인 확장",
+      "description": "로컬 경로 모듈(./modules/...)을 파싱하여 실제 리소스를 module.NAME. 접두사와 함께 인라인 확장.",
+      "priority": "high",
+      "passes": true,
+      "notes": "검증: 로컬 모듈 사용 프로젝트 로드 시 모듈 내 리소스가 표시되는지 확인"
+    },
+    {
+      "id": "feat-004",
+      "name": "레지스트리 모듈 자동 다운로드 및 확장",
+      "description": "terraform init -backend=false 자동 실행 후 .terraform/modules/에서 레지스트리 모듈 소스를 읽어 실제 리소스 확장. locals/count 정적 평가 포함.",
+      "priority": "high",
+      "passes": true,
+      "notes": "검증: terraform-aws-modules/vpc 사용 프로젝트에서 실제 VPC 리소스들이 표시되는지 확인"
+    },
+    {
+      "id": "feat-005",
+      "name": "AWS 아키텍처 스타일 다이어그램 렌더링",
+      "description": "D3.js로 AWS 공식 아키텍처 그림 스타일 SVG 렌더링. VPC/서브넷 중첩 컨테이너, External/Side 패널, 모듈 그룹 박스.",
+      "priority": "high",
+      "passes": true,
+      "notes": "검증: 프로젝트 선택 시 중첩 컨테이너 구조로 다이어그램이 렌더링되는지 확인"
+    },
+    {
+      "id": "feat-006",
+      "name": "리소스 간 연결선(엣지) 시각화",
+      "description": "vpc_id, subnet_ids, role_arn 등 참조를 분석하여 리소스 간 의존 관계를 유형별(network/iam/loadbalancer/reference) 색상 화살표로 표시.",
+      "priority": "high",
+      "passes": true,
+      "notes": "검증: 노드 클릭 시 연결된 엣지가 하이라이트되는지 확인"
+    },
+    {
+      "id": "feat-007",
+      "name": "배관 리소스 숨김 및 상세 보기 토글",
+      "description": "route_table, network_acl, iam_role_policy_attachment 등 배관 리소스는 기본적으로 숨기고, 상세 보기(+N) 버튼으로 토글하여 점선 회색 스타일로 표시.",
+      "priority": "medium",
+      "passes": false,
+      "notes": "검증: 상세 보기 버튼 클릭 시 hidden 리소스가 나타나고 다시 클릭 시 숨겨지는지 확인"
+    },
+    {
+      "id": "feat-008",
+      "name": "줌/팬 및 화면 맞춤",
+      "description": "D3 zoom으로 자유로운 확대/축소 및 드래그 이동. Fit to Screen 버튼으로 전체 다이어그램을 화면에 맞춤.",
+      "priority": "medium",
+      "passes": true,
+      "notes": "검증: 마우스 휠 줌 + Fit 버튼 동작 확인"
+    },
+    {
+      "id": "feat-009",
+      "name": "SVG 내보내기",
+      "description": "현재 다이어그램을 SVG 파일로 다운로드. 인라인 스타일 포함하여 외부에서도 올바르게 렌더링.",
+      "priority": "low",
+      "passes": true,
+      "notes": "검증: Export SVG 버튼 클릭 시 .svg 파일 다운로드 확인"
+    },
+    {
+      "id": "feat-010",
+      "name": "리소스 카탈로그 및 아이콘",
+      "description": "95개 이상의 AWS 리소스 타입에 대한 카테고리, 존, 색상, SVG 아이콘 매핑. EC2, EKS, RDS, Lambda 등 40개 아이콘 인라인 제공.",
+      "priority": "medium",
+      "passes": true,
+      "notes": "검증: 다양한 리소스 타입에 아이콘이 올바르게 표시되는지 확인"
+    }
+  ]
+}
