@@ -271,6 +271,28 @@ const AWS_ICONS = {
       <path d="M12 16l12 8-12 8V16z" fill="#7B42BC" opacity="0.4"/>
       <path d="M28 16v16" stroke="#7B42BC" stroke-width="3"/>`,
   },
+  // ===== Kubernetes / Helm =====
+  helm: {
+    color: '#0F1689',
+    path: `<circle cx="24" cy="24" r="16" fill="#0F1689" opacity="0.1"/>
+      <path d="M24 10l3 8h8l-6.5 5 2.5 8L24 26l-7 5 2.5-8L13 18h8z" fill="#0F1689" opacity="0.7"/>`,
+  },
+  kubernetes: {
+    color: '#326CE5',
+    path: `<circle cx="24" cy="24" r="16" fill="#326CE5" opacity="0.1" stroke="#326CE5" stroke-width="1.5"/>
+      <circle cx="24" cy="24" r="4" fill="#326CE5"/>
+      <path d="M24 10v6M24 32v6M10 24h6M32 24h6M14.7 14.7l4.2 4.2M29.1 29.1l4.2 4.2M33.3 14.7l-4.2 4.2M18.9 29.1l-4.2 4.2" stroke="#326CE5" stroke-width="2"/>`,
+  },
+  vpc_endpoint: {
+    color: '#8C4FFF',
+    path: `<rect x="6" y="12" width="36" height="24" rx="4" fill="#8C4FFF" opacity="0.1" stroke="#8C4FFF" stroke-width="1.5"/>
+      <path d="M14 24h20M28 18l6 6-6 6" stroke="#8C4FFF" stroke-width="2" fill="none"/>`,
+  },
+  codecommit: {
+    color: '#ED7100',
+    path: `<rect x="6" y="6" width="36" height="36" rx="4" fill="#ED7100" opacity="0.1" stroke="#ED7100" stroke-width="1.5"/>
+      <path d="M16 20l4 4-4 4M24 30h8" stroke="#ED7100" stroke-width="2" fill="none"/>`,
+  },
   generic: {
     color: '#888888',
     path: `<rect x="8" y="8" width="32" height="32" rx="4" fill="#888" opacity="0.1" stroke="#888" stroke-width="1.5"/>

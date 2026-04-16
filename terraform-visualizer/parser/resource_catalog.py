@@ -228,6 +228,12 @@ RESOURCE_ICON_MAP = {
     "aws_cloudwatch_metric_alarm": "cloudwatch",
     "aws_backup_plan": "backup",
     "aws_backup_vault": "backup",
+    "aws_vpc_endpoint": "vpc_endpoint",
+    "aws_cloudfront_origin_access_control": "cloudfront",
+    "helm_release": "helm",
+    "kubernetes_service_v1": "kubernetes",
+    "kubernetes_deployment_v1": "kubernetes",
+    "kubernetes_ingress_v1": "kubernetes",
 }
 
 # Well-known registry module representations
@@ -274,26 +280,66 @@ HIDDEN_TYPES = {
     # Subnet groups (implicit when DB resources exist)
     "aws_db_subnet_group", "aws_elasticache_subnet_group",
     "aws_redshift_subnet_group",
-    # IAM plumbing (Role represents the whole IAM entity)
+    # IAM — roles/policies are implicit in large module stacks; shown in detail view
+    "aws_iam_role", "aws_iam_policy",
     "aws_iam_role_policy_attachment", "aws_iam_role_policy",
     "aws_iam_instance_profile",
+    "aws_iam_openid_connect_provider",
+    "aws_iam_user_policy", "aws_iam_service_specific_credential",
+    "aws_iam_access_key", "aws_iam_group", "aws_iam_group_membership",
+    "aws_iam_group_policy_attachment",
     # LB plumbing
     "aws_lb_target_group_attachment",
     # ASG plumbing
     "aws_autoscaling_policy", "aws_autoscaling_attachment",
     "aws_autoscaling_schedule",
-    # SG rules (SG itself is representative)
+    # Security groups (shown as detail; SG rules are always hidden)
+    "aws_security_group",
     "aws_security_group_rule",
     "aws_vpc_security_group_ingress_rule",
     "aws_vpc_security_group_egress_rule",
+    # EFS plumbing (filesystem itself is shown; mount target is plumbing)
+    "aws_efs_mount_target", "aws_efs_access_point",
+    # S3 config sub-resources (bucket itself is shown)
+    "aws_s3_object", "aws_s3_bucket_policy",
+    "aws_s3_bucket_public_access_block", "aws_s3_bucket_ownership_controls",
+    "aws_s3_bucket_acl", "aws_s3_bucket_versioning",
+    "aws_s3_bucket_server_side_encryption_configuration",
+    "aws_s3_bucket_cors_configuration", "aws_s3_bucket_website_configuration",
+    # LB listener/target group (ALB itself is shown)
+    "aws_lb_listener", "aws_alb_listener",
+    "aws_lb_target_group", "aws_alb_target_group",
+    "aws_lb_listener_rule",
+    # Launch template (ASG is shown)
+    "aws_launch_template",
+    # EKS configuration plumbing (cluster/nodegroup are shown; config detail hidden)
+    "aws_eks_addon", "aws_eks_access_entry", "aws_eks_access_policy_association",
+    "aws_eks_identity_provider_config",
+    # KMS plumbing
+    "aws_kms_grant",
+    # Kubernetes plumbing (service_v1/helm_release are shown)
+    "kubernetes_secret_v1", "kubernetes_namespace_v1",
+    "kubernetes_service_account_v1", "kubernetes_config_map_v1",
+    "kubernetes_role_v1", "kubernetes_role_binding_v1",
+    "kubernetes_cluster_role_v1", "kubernetes_cluster_role_binding_v1",
+    # EventBridge / CloudWatch Events plumbing
+    "aws_cloudwatch_event_rule", "aws_cloudwatch_event_target",
+    "aws_cloudwatch_event_bus", "aws_cloudwatch_metric_alarm",
+    # EC2 / ASG config detail
+    "aws_ec2_tag", "aws_placement_group",
+    # CloudFront config sub-resources
+    "aws_cloudfront_origin_access_identity",
+    # CodePipeline / CodeBuild config detail
+    "aws_codestarconnections_connection",
+    "aws_codebuild_source_credential",
     # Misc meta-resources
     "aws_vpc_endpoint_route_table_association",
     "aws_key_pair",
     "terraform_data", "null_resource",
-    "random_password", "random_string", "random_id",
+    "random_password", "random_string", "random_id", "random_integer",
     "local_file", "local_sensitive_file",
     "tls_private_key", "tls_cert_request", "tls_self_signed_cert",
-    "time_sleep", "time_rotating",
+    "time_sleep", "time_rotating", "time_static",
 }
 
 # Resources that serve as visual containers (VPC, subnet zones) — not leaf nodes

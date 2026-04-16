@@ -20,22 +20,22 @@
  */
 
 const L = {
-  NODE_W: 116,
-  NODE_H: 88,
-  NODE_GAP_X: 20,
-  NODE_GAP_Y: 16,
-  ZONE_PAD_X: 28,
-  ZONE_PAD_Y: 24,
-  ZONE_HEADER: 26,
-  ZONE_GAP: 16,
-  VPC_PAD_X: 36,
-  VPC_PAD_Y: 28,
-  VPC_HEADER: 32,
+  NODE_W: 120,
+  NODE_H: 96,
+  NODE_GAP_X: 32,
+  NODE_GAP_Y: 32,
+  ZONE_PAD_X: 40,
+  ZONE_PAD_Y: 44,     // top/bottom padding inside zone (below label)
+  ZONE_HEADER: 44,    // height reserved for zone label text
+  ZONE_GAP: 32,       // vertical gap between zone boxes
+  VPC_PAD_X: 52,
+  VPC_PAD_Y: 32,      // extra padding below VPC header label
+  VPC_HEADER: 52,     // height reserved for VPC label
   EXTERNAL_PAD: 28,
-  EXTERNAL_HEADER: 24,
-  SIDE_PAD: 20,
-  SIDE_GAP: 24,        // gap between VPC and side panel
-  CANVAS_PAD: 40,
+  EXTERNAL_HEADER: 44,
+  SIDE_PAD: 28,
+  SIDE_GAP: 40,       // gap between VPC and side panels
+  CANVAS_PAD: 48,
 };
 
 // Types that are visual containers, not leaf nodes
@@ -82,9 +82,11 @@ function computeLayout(data, showDetails = false) {
     const z = _classifyStub(s);
     zones[z].push({ ...s, nodeType: 'module' });
   }
-  // Data sources → side
-  for (const d of dataSources) {
-    zones.side.push({ ...d, nodeType: 'data' });
+  // Data sources → side (only in detail view; they're reference lookups, not infra resources)
+  if (showDetails) {
+    for (const d of dataSources) {
+      zones.side.push({ ...d, nodeType: 'data', isDetail: true });
+    }
   }
 
   // ── Step 1: layout each vpc-internal zone ──────────────────────────
@@ -146,43 +148,44 @@ function computeLayout(data, showDetails = false) {
   const vpcW = zoneW + L.VPC_PAD_X * 2;
   const vpcH = vpcInnerH;
 
-  // ── Step 3: layout external row ──────────────────────────────────
+  // ── Step 3: layout external left panel (CDN, S3 static, WAF — user-facing) ──
   const extItems = zones.external;
-  let extH = 0;
-  let extBoxInfo = null;
+  let extPanelW = 0;
+  let extPanelH = 0;
+  let extGridInfo = null;
   if (extItems.length) {
-    // Force all external items into one row (or up to 8 cols)
-    const cols = Math.min(extItems.length, 8);
-    const rows = Math.ceil(extItems.length / cols);
-    const innerW = cols * L.NODE_W + (cols - 1) * L.NODE_GAP_X;
+    // Single column panel on the left (mirrors side panel style)
+    const cols = 1;
+    const rows = extItems.length;
+    const innerW = L.NODE_W;
     const innerH = rows * L.NODE_H + (rows - 1) * L.NODE_GAP_Y;
-    extBoxInfo = { cols, rows, innerW, innerH };
-    extH = L.EXTERNAL_HEADER + L.EXTERNAL_PAD * 2 + innerH;
+    extGridInfo = { cols, rows, innerW, innerH };
+    extPanelW = L.NODE_W + L.SIDE_PAD * 2;
+    extPanelH = innerH + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
   }
 
-  // ── Step 4: layout side panel ─────────────────────────────────────
+  // ── Step 4: layout right side panel (CI/CD, IAM, monitoring) ─────
   const sideItems = zones.side;
   let sideW = 0;
   let sideH = 0;
   if (sideItems.length) {
     sideW = L.NODE_W + L.SIDE_PAD * 2;
-    sideH = sideItems.length * L.NODE_H + (sideItems.length - 1) * L.NODE_GAP_Y + L.SIDE_PAD * 2 + 26;
+    sideH = sideItems.length * L.NODE_H + (sideItems.length - 1) * L.NODE_GAP_Y + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
   }
 
   // ── Step 5: absolute positions ────────────────────────────────────
   const canvasX = L.CANVAS_PAD;
   const canvasY = L.CANVAS_PAD;
 
-  // External row
+  // External left panel
   const extX = canvasX;
   const extY = canvasY;
-  const extContainerW = Math.max(vpcW, extBoxInfo ? extBoxInfo.innerW + L.EXTERNAL_PAD * 2 : 0);
 
-  // VPC
-  const vpcX = canvasX;
-  const vpcY = canvasY + (extH > 0 ? extH + L.ZONE_GAP : 0);
+  // VPC — offset right of external panel
+  const vpcX = canvasX + (extPanelW > 0 ? extPanelW + L.SIDE_GAP : 0);
+  const vpcY = canvasY;
 
-  // Side panel
+  // Right side panel
   const sideX = vpcX + vpcW + L.SIDE_GAP;
   const sideY = vpcY;
 
@@ -194,16 +197,12 @@ function computeLayout(data, showDetails = false) {
   const allNodes = [];
   const nodeMap = {};
 
-  // External nodes
-  if (extItems.length && extBoxInfo) {
-    const { cols } = extBoxInfo;
-    const totalGridW = extBoxInfo.cols * L.NODE_W + (extBoxInfo.cols - 1) * L.NODE_GAP_X;
-    const offsetX = extX + (extContainerW - totalGridW) / 2;
+  // External nodes — left panel, single column
+  if (extItems.length && extGridInfo) {
+    const nodeX = extX + L.SIDE_PAD;
     extItems.forEach((item, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      item.x = offsetX + col * (L.NODE_W + L.NODE_GAP_X);
-      item.y = extY + L.EXTERNAL_HEADER + L.EXTERNAL_PAD + row * (L.NODE_H + L.NODE_GAP_Y);
+      item.x = nodeX;
+      item.y = extY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (L.NODE_H + L.NODE_GAP_Y);
       item.width = L.NODE_W;
       item.height = L.NODE_H;
       allNodes.push(item);
@@ -256,7 +255,7 @@ function computeLayout(data, showDetails = false) {
     const nodeX = sideX + L.SIDE_PAD;
     sideItems.forEach((item, i) => {
       item.x = nodeX;
-      item.y = sideY + 26 + L.SIDE_PAD + i * (L.NODE_H + L.NODE_GAP_Y);
+      item.y = sideY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (L.NODE_H + L.NODE_GAP_Y);
       item.width = L.NODE_W;
       item.height = L.NODE_H;
       allNodes.push(item);
@@ -267,15 +266,16 @@ function computeLayout(data, showDetails = false) {
   // ── Step 7: build container list for rendering ─────────────────────
   const containers = [];
 
-  // External
+  // External left panel
   if (extItems.length) {
+    const panelH = Math.max(extPanelH, vpcH); // match VPC height
     containers.push({
       id: 'zone-external',
       zone: 'external',
       x: extX, y: extY,
-      width: extContainerW,
-      height: extH,
-      label: 'External Services',
+      width: extPanelW,
+      height: panelH,
+      label: 'External',
     });
   }
 
@@ -324,19 +324,21 @@ function computeLayout(data, showDetails = false) {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+const VALID_ZONES = new Set(['external', 'boundary', 'public', 'private', 'database', 'side']);
+
 function _classify(r) {
   const t = r.type;
   // Boundary resources
   if (t === 'aws_internet_gateway') return 'boundary';
-  // External
-  if (['cdn', 'cicd'].includes(r.category)) return 'external';
+  // External: CDN, DNS, WAF, ACM (user-facing front door)
+  if (r.category === 'cdn') return 'external';
   if (['aws_wafv2_web_acl', 'aws_wafv2_web_acl_association'].includes(t)) return 'external';
   if (t === 'aws_acm_certificate' || t === 'aws_acm_certificate_validation') return 'external';
   // S3 that's likely a website (external), otherwise storage
   if (t === 'aws_s3_bucket' && !r.from_module) return 'external';
   if (r.category === 'storage') return 'database'; // EFS, EBS near DB
-  // Side: IAM, monitoring, encryption
-  if (['iam', 'monitoring'].includes(r.category)) return 'side';
+  // Side: IAM, monitoring, encryption, CI/CD (support services — not traffic path)
+  if (['iam', 'monitoring', 'security', 'cicd'].includes(r.category)) return 'side';
   if (['aws_kms_key', 'aws_kms_alias', 'aws_secretsmanager_secret',
        'aws_secretsmanager_secret_version'].includes(t)) return 'side';
   // Public: LB, NAT
@@ -348,7 +350,8 @@ function _classify(r) {
   if (['compute', 'container', 'serverless'].includes(r.category)) return 'private';
   // Networking that's not structural → private
   if (r.category === 'networking') return 'private';
-  return r.zone || 'private';
+  // Fallback: use catalog zone if valid, else private
+  return VALID_ZONES.has(r.zone) ? r.zone : 'private';
 }
 
 function _classifyStub(m) {
@@ -375,7 +378,7 @@ function _zoneLabel(zone) {
     public: 'Public Subnet',
     private: 'Private / Compute',
     database: 'Database / Storage',
-    side: 'IAM & Config',
+    side: 'CI/CD & Config',
   }[zone] || zone;
 }
 

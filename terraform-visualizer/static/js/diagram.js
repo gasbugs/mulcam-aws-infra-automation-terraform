@@ -90,8 +90,8 @@ function renderDiagram(data, showDetails = false) {
     // Zone label with icon indicator
     cg.append('text')
       .attr('class', 'container-label')
-      .attr('x', c.x + 12)
-      .attr('y', c.y + (c.isVPC ? 24 : 18))
+      .attr('x', c.x + 16)
+      .attr('y', c.y + (c.isVPC ? 34 : 27))
       .text(c.label);
   });
 
