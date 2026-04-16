@@ -547,11 +547,12 @@ body {
 }
 
 .code-panel-resize-handle {
-  height: 6px;
-  background: transparent;
+  height: 12px;
+  background: #13131f;
   cursor: ns-resize;
   flex-shrink: 0;
   position: relative;
+  border-bottom: 1px solid #2a2a3e;
 }
 .code-panel-resize-handle::before {
   content: '';
@@ -559,8 +560,8 @@ body {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 40px;
-  height: 3px;
+  width: 48px;
+  height: 4px;
   background: #3a3a50;
   border-radius: 2px;
   transition: background 0.15s;

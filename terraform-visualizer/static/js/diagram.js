@@ -62,29 +62,43 @@ function initDiagram() {
 
   svg.call(zoom);
 
-  // Code panel resize handle
+  // Background click → deselect (check that click is NOT on a node or badge)
+  svg.node().addEventListener('click', (event) => {
+    if (!event.target.closest('.resource-node') && !event.target.closest('.expand-badge')) {
+      _clearSelection();
+    }
+  });
+
+  // Code panel resize handle — drag up/down to resize panel height
   const resizeHandle = document.getElementById('code-panel-resize');
   if (resizeHandle) {
     let _resizing = false;
     let _startY = 0;
     let _startH = 0;
+    const MIN_H = 80;
+    const MAX_H_RATIO = 0.8;
 
     resizeHandle.addEventListener('mousedown', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       _resizing = true;
       _startY = e.clientY;
       const panel = document.getElementById('code-panel');
-      _startH = panel.offsetHeight;
+      // Use getBoundingClientRect for reliable height even with CSS transform
+      _startH = panel.getBoundingClientRect().height;
       resizeHandle.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'ns-resize';
     });
 
     document.addEventListener('mousemove', (e) => {
       if (!_resizing) return;
       const panel = document.getElementById('code-panel');
-      const delta = _startY - e.clientY;  // drag up = increase height
-      const minH = parseInt(getComputedStyle(panel).minHeight) || 80;
-      const maxH = Math.floor(window.innerHeight * 0.8);
-      const newH = Math.min(maxH, Math.max(minH, _startH + delta));
+      const delta = _startY - e.clientY;  // drag up = positive delta = increase height
+      const maxH = Math.floor(window.innerHeight * MAX_H_RATIO);
+      const newH = Math.min(maxH, Math.max(MIN_H, _startH + delta));
+      // Disable transition temporarily so resize is instant
+      panel.style.transition = 'none';
       panel.style.height = newH + 'px';
     });
 
@@ -92,6 +106,11 @@ function initDiagram() {
       if (_resizing) {
         _resizing = false;
         resizeHandle.classList.remove('dragging');
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        // Restore transition after resize ends
+        const panel = document.getElementById('code-panel');
+        panel.style.transition = '';
       }
     });
   }
@@ -117,14 +136,6 @@ function renderDiagram(data, showDetails = false) {
   currentData = data;
   selectedNode = null;
   rootG.selectAll('*').remove();
-
-  // Transparent full-canvas background rect to catch background clicks for deselect
-  rootG.append('rect')
-    .attr('class', 'diagram-bg')
-    .attr('x', -50000).attr('y', -50000)
-    .attr('width', 100000).attr('height', 100000)
-    .attr('fill', 'transparent')
-    .on('click', () => _clearSelection());
 
   // Pre-compute hidden neighbor sets for +N badges (before layout)
   const hiddenSet = new Set((data.resources || []).filter(r => r.hidden).map(r => r.id));
