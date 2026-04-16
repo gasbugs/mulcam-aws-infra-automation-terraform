@@ -66,6 +66,16 @@ function initDiagram() {
     });
 
   svg.call(zoom);
+
+  // Click on SVG background → deselect / cancel highlight
+  svg.on('click', (event) => {
+    if (event.target === svg.node()) {
+      selectedNode = null;
+      d3.selectAll('.resource-node').classed('highlighted', false).classed('dimmed', false);
+      d3.selectAll('.edge-line').classed('highlighted', false).classed('dimmed', false);
+      hideCodePanel();
+    }
+  });
 }
 
 
@@ -408,8 +418,10 @@ async function fetchAndShowCode(node) {
   panel.classList.remove('hidden');
 
   try {
+    const repoParam = (typeof currentRepoId !== 'undefined' && currentRepoId)
+      ? `&repo_id=${encodeURIComponent(currentRepoId)}` : '';
     const res = await fetch(
-      `/api/source?path=${encodeURIComponent(currentData.path)}&id=${encodeURIComponent(node.id)}`
+      `/api/source?path=${encodeURIComponent(currentData.path)}&id=${encodeURIComponent(node.id)}${repoParam}`
     );
     const data = await res.json();
 

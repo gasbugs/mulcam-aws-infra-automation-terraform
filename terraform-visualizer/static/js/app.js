@@ -4,6 +4,7 @@
  */
 
 let showDetails = false;
+let currentRepoId = '';  // '' = main repo, non-empty = uploaded/github repo
 
 document.addEventListener('DOMContentLoaded', () => {
   initDiagram();
@@ -24,6 +25,35 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.classList.toggle('active', showDetails);
     label.textContent = showDetails ? '간단히 보기' : '상세 보기';
     if (currentData) renderDiagram(currentData, showDetails);
+  });
+
+  // ZIP upload
+  document.getElementById('btn-zip').addEventListener('click', () => {
+    document.getElementById('zip-file-input').click();
+  });
+  document.getElementById('zip-file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';  // reset so same file can be re-uploaded
+    await loadZipFile(file);
+  });
+
+  // GitHub modal
+  document.getElementById('btn-github').addEventListener('click', () => {
+    document.getElementById('github-modal').classList.remove('hidden');
+    document.getElementById('github-url-input').value = '';
+    document.getElementById('github-error').classList.add('hidden');
+    document.getElementById('github-url-input').focus();
+  });
+  document.getElementById('github-modal-close').addEventListener('click', closeGithubModal);
+  document.getElementById('github-modal-cancel').addEventListener('click', closeGithubModal);
+  document.getElementById('github-modal-load').addEventListener('click', loadGithubRepo);
+  document.getElementById('github-url-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadGithubRepo();
+    if (e.key === 'Escape') closeGithubModal();
+  });
+  document.getElementById('github-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeGithubModal();
   });
 });
 
@@ -103,7 +133,8 @@ async function selectProject(proj, element) {
   showLoading(true);
 
   try {
-    const res = await fetch(`/api/project?path=${encodeURIComponent(proj.path)}`);
+    const repoParam = proj.repo_id ? `&repo_id=${encodeURIComponent(proj.repo_id)}` : '';
+    const res = await fetch(`/api/project?path=${encodeURIComponent(proj.path)}${repoParam}`);
     const data = await res.json();
 
     if (data.error) {
@@ -126,6 +157,7 @@ async function selectProject(proj, element) {
     document.getElementById('btn-details').classList.remove('active');
     document.getElementById('btn-details-label').textContent = '상세 보기';
     hideCodePanel();
+    currentRepoId = proj.repo_id || '';
     resetExpandState();
     renderDiagram(data, showDetails);
 
@@ -234,4 +266,121 @@ function showLoading(show) {
   } else if (loader) {
     loader.remove();
   }
+}
+
+
+function closeGithubModal() {
+  document.getElementById('github-modal').classList.add('hidden');
+}
+
+
+async function loadZipFile(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  showLoading(true);
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.error) {
+      alert(`업로드 실패: ${data.error}`);
+      return;
+    }
+    renderUploadedSection(data.repo_id, data.name || file.name, data.modules);
+  } catch (err) {
+    alert(`업로드 중 오류: ${err.message}`);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+async function loadGithubRepo() {
+  const url = document.getElementById('github-url-input').value.trim();
+  if (!url) return;
+
+  const errEl = document.getElementById('github-error');
+  const btn = document.getElementById('github-modal-load');
+  errEl.classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = '가져오는 중...';
+
+  try {
+    const res = await fetch('/api/github', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      errEl.textContent = data.error;
+      errEl.classList.remove('hidden');
+      return;
+    }
+    closeGithubModal();
+    renderUploadedSection(data.repo_id, data.name || url, data.modules);
+  } catch (err) {
+    errEl.textContent = `연결 오류: ${err.message}`;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '가져오기';
+  }
+}
+
+
+function renderUploadedSection(repoId, name, modules) {
+  const tree = document.getElementById('project-tree');
+
+  // Remove existing section with same repoId
+  const existing = tree.querySelector(`[data-repo-id="${repoId}"]`);
+  if (existing) existing.remove();
+
+  const section = document.createElement('div');
+  section.className = 'module-group';
+  section.dataset.repoId = repoId;
+
+  const header = document.createElement('div');
+  header.className = 'upload-section-header';
+  header.innerHTML = `
+    <span class="upload-name" title="${name}">📦 ${name}</span>
+    <button class="btn-remove-repo" title="제거">✕</button>
+  `;
+  header.querySelector('.btn-remove-repo').addEventListener('click', async () => {
+    await fetch('/api/repo/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo_id: repoId }),
+    });
+    section.remove();
+  });
+
+  const list = document.createElement('div');
+  list.className = 'project-list';
+
+  // Flatten all projects from all modules
+  const allProjects = modules.flatMap(m => m.projects.map(p => ({ ...p, repo_id: repoId })));
+
+  if (!allProjects.length) {
+    list.innerHTML = '<div style="padding:12px 34px;font-size:12px;color:#6b7280;">Terraform 프로젝트 없음</div>';
+  } else {
+    allProjects.forEach(proj => {
+      const item = document.createElement('div');
+      item.className = 'project-item';
+      item.dataset.path = proj.path;
+      item.innerHTML = `
+        <span class="project-name">${proj.name}</span>
+        ${proj.has_modules ? '<span class="module-badge">M</span>' : ''}
+        <span class="tf-count">${proj.tf_files} tf</span>
+      `;
+      item.addEventListener('click', () => selectProject(proj, item));
+      list.appendChild(item);
+    });
+  }
+
+  section.appendChild(header);
+  section.appendChild(list);
+  tree.appendChild(section);
+
+  // Scroll to new section
+  section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }

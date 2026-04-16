@@ -658,3 +658,186 @@ body {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== Upload Bar (sidebar) ===== */
+.upload-bar {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.btn-source {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 8px;
+  background: #1a2332;
+  border: 1px solid #37475a;
+  border-radius: 5px;
+  color: #d5dbdb;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-source:hover {
+  background: #37475a;
+  border-color: #ff9900;
+  color: #ff9900;
+}
+
+/* Uploaded repo section in sidebar */
+.upload-section-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ff9900;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-top: 1px solid #37475a;
+  margin-top: 4px;
+}
+
+.upload-section-header .upload-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-remove-repo {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.btn-remove-repo:hover { color: #f87171; }
+
+/* ===== Modal ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-overlay.hidden { display: none; }
+
+.modal-box {
+  background: #1e2535;
+  border: 1px solid #37475a;
+  border-radius: 10px;
+  width: 440px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #37475a;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #6b7280;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.modal-close:hover { color: #fff; }
+
+.modal-body {
+  padding: 18px;
+}
+
+.modal-hint {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 10px;
+}
+
+.modal-hint code {
+  background: #0f1624;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #ff9900;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 9px 12px;
+  background: #0f1624;
+  border: 1px solid #37475a;
+  border-radius: 6px;
+  color: #d5dbdb;
+  font-size: 13px;
+  outline: none;
+}
+
+.modal-input:focus { border-color: #ff9900; }
+
+.modal-error {
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: rgba(248,113,113,0.1);
+  border: 1px solid rgba(248,113,113,0.3);
+  border-radius: 5px;
+  color: #f87171;
+  font-size: 12px;
+}
+
+.modal-error.hidden { display: none; }
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid #37475a;
+}
+
+.btn-modal-cancel {
+  padding: 7px 16px;
+  background: #1a2332;
+  border: 1px solid #37475a;
+  border-radius: 6px;
+  color: #9ca3af;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn-modal-cancel:hover { background: #37475a; color: #fff; }
+
+.btn-modal-load {
+  padding: 7px 16px;
+  background: #ff9900;
+  border: 1px solid #ff9900;
+  border-radius: 6px;
+  color: #1a2332;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-modal-load:hover { background: #ffb733; }
+.btn-modal-load:disabled { opacity: 0.5; cursor: not-allowed; }

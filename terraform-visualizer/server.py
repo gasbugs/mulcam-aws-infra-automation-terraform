@@ -3,6 +3,10 @@
 import argparse
 import os
 import json
+import zipfile
+import uuid
+import shutil
+import urllib.request as _urlreq
 from flask import Flask, jsonify, send_from_directory, request
 
 from parser.project_scanner import scan_projects
@@ -18,6 +22,10 @@ from parser.resource_catalog import (
 app = Flask(__name__, static_folder='static')
 REPO_ROOT = None
 _cache = {}
+
+UPLOAD_DIR = '/tmp/tf-viz-uploads'
+_upload_repos = {}  # repo_id -> absolute directory path
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @app.route('/')
@@ -44,15 +52,23 @@ def api_projects():
 @app.route('/api/project')
 def api_project():
     path = request.args.get('path', '')
+    repo_id = request.args.get('repo_id', '')
     if not path:
         return jsonify({"error": "path parameter required"}), 400
 
-    project_dir = os.path.join(REPO_ROOT, path)
+    if repo_id:
+        base_dir = _upload_repos.get(repo_id)
+        if not base_dir:
+            return jsonify({"error": f"Unknown repo_id: {repo_id}"}), 404
+    else:
+        base_dir = REPO_ROOT
+
+    project_dir = os.path.join(base_dir, path)
     if not os.path.isdir(project_dir):
         return jsonify({"error": f"directory not found: {path}"}), 404
 
-    # Check cache
-    cache_key = path
+    # Check cache (include repo_id in key)
+    cache_key = f"{repo_id}::{path}" if repo_id else path
     mtime = _get_dir_mtime(project_dir)
     if cache_key in _cache and _cache[cache_key]["mtime"] == mtime:
         return jsonify(_cache[cache_key]["data"])
@@ -162,10 +178,12 @@ def api_source():
     if not project_path or not resource_id:
         return jsonify({"error": "path and id required"}), 400
 
-    cache_key = project_path
+    repo_id = request.args.get('repo_id', '')
+    cache_key = f"{repo_id}::{project_path}" if repo_id else project_path
     if cache_key not in _cache:
         return jsonify({"error": "project not loaded — view it first"}), 404
 
+    source_base = _upload_repos.get(repo_id) if repo_id else REPO_ROOT
     cached_data = _cache[cache_key]["data"]
     parts = resource_id.split('.')
 
@@ -182,7 +200,7 @@ def api_source():
         block = _extract_hcl_block(content, 'module', mod_name, None)
         return jsonify({
             "id": resource_id,
-            "file": os.path.relpath(file_path, REPO_ROOT),
+            "file": os.path.relpath(file_path, source_base) if source_base else file_path,
             "source": block or f"# Could not extract module block for '{mod_name}'",
         })
 
@@ -200,7 +218,7 @@ def api_source():
         block = _extract_hcl_block(content, 'data', parts[1], parts[2])
         return jsonify({
             "id": resource_id,
-            "file": os.path.relpath(file_path, REPO_ROOT),
+            "file": os.path.relpath(file_path, source_base) if source_base else file_path,
             "source": block or f"# Could not extract block from {os.path.basename(file_path)}",
         })
 
@@ -222,7 +240,7 @@ def api_source():
     block = _extract_hcl_block(content, 'resource', res_type, res_name)
     return jsonify({
         "id": resource_id,
-        "file": os.path.relpath(file_path, REPO_ROOT),
+        "file": os.path.relpath(file_path, source_base) if source_base else file_path,
         "source": block or f"# Could not extract block from {os.path.basename(file_path)}",
     })
 
@@ -253,6 +271,134 @@ def _extract_hcl_block(content, block_type, res_type, res_name):
                 return content[start:i + 1]
         i += 1
     return content[start:]  # unterminated block fallback
+
+
+@app.route('/api/upload', methods=['POST'])
+def api_upload():
+    """Accept a ZIP file, extract to temp dir, scan for Terraform projects."""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file field in request"}), 400
+    f = request.files['file']
+    if not f.filename.lower().endswith('.zip'):
+        return jsonify({"error": "Only .zip files are supported"}), 400
+
+    repo_id = uuid.uuid4().hex[:10]
+    extract_dir = os.path.join(UPLOAD_DIR, repo_id)
+    os.makedirs(extract_dir, exist_ok=True)
+    try:
+        zip_path = os.path.join(extract_dir, '_upload.zip')
+        f.save(zip_path)
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(extract_dir)
+        os.remove(zip_path)
+    except Exception as e:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        return jsonify({"error": f"Failed to extract ZIP: {e}"}), 400
+
+    actual_root = _find_root(extract_dir)
+    _upload_repos[repo_id] = actual_root
+    modules = scan_projects(actual_root)
+    name = os.path.splitext(f.filename)[0]
+    return jsonify({"repo_id": repo_id, "name": name, "modules": modules})
+
+
+@app.route('/api/github', methods=['POST'])
+def api_github():
+    """Download a public GitHub repo as ZIP, extract, scan for projects."""
+    data = request.get_json(silent=True) or {}
+    url = data.get('url', '').strip()
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+
+    try:
+        user, repo, branch = _parse_github_url(url)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    # Try HEAD (default branch) first, then explicit branch
+    candidates = [
+        f"https://github.com/{user}/{repo}/archive/HEAD.zip",
+    ]
+    if branch and branch not in ('main', 'master'):
+        candidates.insert(0, f"https://github.com/{user}/{repo}/archive/refs/heads/{branch}.zip")
+
+    repo_id = uuid.uuid4().hex[:10]
+    extract_dir = os.path.join(UPLOAD_DIR, repo_id)
+    os.makedirs(extract_dir, exist_ok=True)
+
+    last_err = None
+    for zip_url in candidates:
+        try:
+            zip_path = os.path.join(extract_dir, '_repo.zip')
+            req = _urlreq.Request(zip_url, headers={'User-Agent': 'TerraformVisualizer/1.0'})
+            with _urlreq.urlopen(req, timeout=30) as resp:
+                with open(zip_path, 'wb') as fh:
+                    fh.write(resp.read())
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(extract_dir)
+            os.remove(zip_path)
+            last_err = None
+            break
+        except Exception as e:
+            last_err = e
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+
+    if last_err:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        return jsonify({"error": f"Failed to download repository: {last_err}"}), 400
+
+    actual_root = _find_root(extract_dir)
+    _upload_repos[repo_id] = actual_root
+    modules = scan_projects(actual_root)
+    return jsonify({"repo_id": repo_id, "name": f"{user}/{repo}", "modules": modules})
+
+
+@app.route('/api/repo/remove', methods=['POST'])
+def api_repo_remove():
+    """Remove an uploaded repo and its temp files."""
+    data = request.get_json(silent=True) or {}
+    repo_id = data.get('repo_id', '')
+    if repo_id in _upload_repos:
+        extract_dir = os.path.join(UPLOAD_DIR, repo_id)
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        del _upload_repos[repo_id]
+        # Clear related cache entries
+        for key in list(_cache.keys()):
+            if key.startswith(f"{repo_id}::"):
+                del _cache[key]
+    return jsonify({"ok": True})
+
+
+def _find_root(extract_dir):
+    """If the extracted dir has exactly one subdir, use that as root."""
+    try:
+        contents = [c for c in os.listdir(extract_dir)
+                    if not c.startswith('.') and c != '__MACOSX']
+        if len(contents) == 1:
+            candidate = os.path.join(extract_dir, contents[0])
+            if os.path.isdir(candidate):
+                return candidate
+    except Exception:
+        pass
+    return extract_dir
+
+
+def _parse_github_url(url):
+    """Return (user, repo, branch) from a GitHub URL string."""
+    import re
+    url = re.sub(r'^https?://github\.com/', '', url.strip().rstrip('/'))
+    # user/repo/tree/branch  or  user/repo@branch  or  user/repo
+    tree_m = re.match(r'^([^/]+)/([^/@]+)/tree/(.+)$', url)
+    if tree_m:
+        return tree_m.group(1), tree_m.group(2), tree_m.group(3)
+    at_m = re.match(r'^([^/]+)/([^@]+)@(.+)$', url)
+    if at_m:
+        return at_m.group(1), at_m.group(2), at_m.group(3)
+    plain_m = re.match(r'^([^/]+)/([^/]+)$', url)
+    if plain_m:
+        return plain_m.group(1), plain_m.group(2), 'main'
+    raise ValueError(f"Cannot parse GitHub URL: {url!r}. Expected: user/repo or https://github.com/user/repo")
 
 
 def _filter_active(resources, variables):
