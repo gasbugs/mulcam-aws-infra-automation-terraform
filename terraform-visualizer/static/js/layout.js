@@ -66,12 +66,13 @@ function computeLayout(data, showDetails = false) {
 
   // Classify into zones
   const zones = {
-    external: [],   // CloudFront, Route53, S3, WAF, API GW, CI/CD, ACM
+    external: [],   // CloudFront, Route53, S3, WAF, API GW, ACM
     boundary: [],   // IGW (shown at VPC top border)
     public: [],     // ALB, NAT, EIP
     private: [],    // EC2, ASG, ECS, EKS, Lambda, ECR
     database: [],   // RDS, Aurora, DynamoDB, ElastiCache, EFS
     side: [],       // IAM, KMS, Secrets, CloudWatch
+    cicd: [],       // CI/CD pipeline resources
   };
 
   for (const r of leafNodes) {
@@ -164,13 +165,22 @@ function computeLayout(data, showDetails = false) {
     extPanelH = innerH + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
   }
 
-  // ── Step 4: layout right side panel (CI/CD, IAM, monitoring) ─────
+  // ── Step 4: layout right side panel (IAM, monitoring, security) ──
   const sideItems = zones.side;
   let sideW = 0;
   let sideH = 0;
   if (sideItems.length) {
     sideW = L.NODE_W + L.SIDE_PAD * 2;
     sideH = sideItems.length * L.NODE_H + (sideItems.length - 1) * L.NODE_GAP_Y + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
+  }
+
+  // ── Step 4b: CI/CD panel (below side panel) ───────────────────────
+  const cicdItems = zones.cicd;
+  let cicdW = 0;
+  let cicdH = 0;
+  if (cicdItems.length) {
+    cicdW = L.NODE_W + L.SIDE_PAD * 2;
+    cicdH = cicdItems.length * L.NODE_H + (cicdItems.length - 1) * L.NODE_GAP_Y + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
   }
 
   // ── Step 5: absolute positions ────────────────────────────────────
@@ -185,13 +195,19 @@ function computeLayout(data, showDetails = false) {
   const vpcX = canvasX + (extPanelW > 0 ? extPanelW + L.SIDE_GAP : 0);
   const vpcY = canvasY;
 
-  // Right side panel
+  // Right side panel (IAM & Config)
   const sideX = vpcX + vpcW + L.SIDE_GAP;
   const sideY = vpcY;
 
+  // CI/CD panel (below side panel)
+  const cicdX = sideX;
+  const cicdY = sideY + sideH + (sideH > 0 && cicdH > 0 ? L.SIDE_GAP : 0);
+
   // Total canvas
-  const totalW = sideW > 0 ? sideX + sideW + L.CANVAS_PAD : vpcX + vpcW + L.CANVAS_PAD;
-  const totalH = vpcY + vpcH + L.CANVAS_PAD;
+  const rightPanelW = Math.max(sideW, cicdW);
+  const rightBottom = Math.max(sideY + sideH, cicdY + cicdH);
+  const totalW = rightPanelW > 0 ? sideX + rightPanelW + L.CANVAS_PAD : vpcX + vpcW + L.CANVAS_PAD;
+  const totalH = Math.max(vpcY + vpcH, rightBottom) + L.CANVAS_PAD;
 
   // ── Step 6: build node positions ──────────────────────────────────
   const allNodes = [];
@@ -263,6 +279,19 @@ function computeLayout(data, showDetails = false) {
     });
   }
 
+  // CI/CD nodes
+  if (cicdItems.length) {
+    const nodeX = cicdX + L.SIDE_PAD;
+    cicdItems.forEach((item, i) => {
+      item.x = nodeX;
+      item.y = cicdY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (L.NODE_H + L.NODE_GAP_Y);
+      item.width = L.NODE_W;
+      item.height = L.NODE_H;
+      allNodes.push(item);
+      nodeMap[item.id] = item;
+    });
+  }
+
   // ── Step 7: build container list for rendering ─────────────────────
   const containers = [];
 
@@ -315,6 +344,17 @@ function computeLayout(data, showDetails = false) {
     });
   }
 
+  // CI/CD panel
+  if (cicdItems.length) {
+    containers.push({
+      id: 'zone-cicd',
+      zone: 'cicd',
+      x: cicdX, y: cicdY,
+      width: cicdW, height: cicdH,
+      label: 'CI/CD Pipeline',
+    });
+  }
+
   // ── Step 8: module groups ──────────────────────────────────────────
   const moduleGroups = _computeModuleGroups(allNodes);
 
@@ -324,7 +364,7 @@ function computeLayout(data, showDetails = false) {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-const VALID_ZONES = new Set(['external', 'boundary', 'public', 'private', 'database', 'side']);
+const VALID_ZONES = new Set(['external', 'boundary', 'public', 'private', 'database', 'side', 'cicd']);
 
 function _classify(r) {
   const t = r.type;
@@ -338,7 +378,8 @@ function _classify(r) {
   if (t === 'aws_s3_bucket' && !r.from_module) return 'external';
   if (r.category === 'storage') return 'database'; // EFS, EBS near DB
   // Side: IAM, monitoring, encryption, CI/CD (support services — not traffic path)
-  if (['iam', 'monitoring', 'security', 'cicd'].includes(r.category)) return 'side';
+  if (['iam', 'monitoring', 'security'].includes(r.category)) return 'side';
+  if (r.category === 'cicd') return 'cicd';
   if (['aws_kms_key', 'aws_kms_alias', 'aws_secretsmanager_secret',
        'aws_secretsmanager_secret_version'].includes(t)) return 'side';
   // Public: LB, NAT
@@ -378,7 +419,8 @@ function _zoneLabel(zone) {
     public: 'Public Subnet',
     private: 'Private / Compute',
     database: 'Database / Storage',
-    side: 'CI/CD & Config',
+    side: 'IAM & Config',
+    cicd: 'CI/CD Pipeline',
   }[zone] || zone;
 }
 
@@ -423,25 +465,45 @@ function _computeModuleGroups(nodes) {
  * Skips edges where either endpoint is not in nodeMap.
  */
 function computeEdgePaths(edges, nodeMap) {
-  return edges.map(edge => {
-    const from = nodeMap[edge.from];
-    const to = nodeMap[edge.to];
-    if (!from || !to) return null;
+  const validEdges = edges.filter(e => nodeMap[e.from] && nodeMap[e.to]);
 
-    const fcx = from.x + from.width / 2;
+  // Count how many edges leave/enter each node to compute spread offsets
+  const outCount = {}, inCount = {};
+  validEdges.forEach(e => {
+    outCount[e.from] = (outCount[e.from] || 0) + 1;
+    inCount[e.to]   = (inCount[e.to]   || 0) + 1;
+  });
+
+  const outIdx = {}, inIdx = {};
+
+  return validEdges.map(edge => {
+    const from = nodeMap[edge.from];
+    const to   = nodeMap[edge.to];
+
+    // Running index for this source / target
+    const oi = outIdx[edge.from] ?? 0; outIdx[edge.from] = oi + 1;
+    const ii = inIdx[edge.to]   ?? 0; inIdx[edge.to]   = ii + 1;
+
+    const fcx = from.x + from.width  / 2;
     const fcy = from.y + from.height / 2;
-    const tcx = to.x + to.width / 2;
-    const tcy = to.y + to.height / 2;
+    const tcx = to.x   + to.width    / 2;
+    const tcy = to.y   + to.height   / 2;
 
     const dx = tcx - fcx, dy = tcy - fcy;
     let x1, y1, x2, y2;
 
     if (Math.abs(dy) >= Math.abs(dx)) {
-      if (dy > 0) { x1 = fcx; y1 = from.y + from.height; x2 = tcx; y2 = to.y; }
-      else         { x1 = fcx; y1 = from.y;               x2 = tcx; y2 = to.y + to.height; }
+      // Vertical-dominant: spread exit/entry points along the horizontal edge
+      const fOff = _edgeSpread(oi, outCount[edge.from], from.width  * 0.3);
+      const tOff = _edgeSpread(ii, inCount[edge.to],    to.width    * 0.3);
+      if (dy > 0) { x1 = fcx + fOff; y1 = from.y + from.height; x2 = tcx + tOff; y2 = to.y; }
+      else         { x1 = fcx + fOff; y1 = from.y;               x2 = tcx + tOff; y2 = to.y + to.height; }
     } else {
-      if (dx > 0) { x1 = from.x + from.width; y1 = fcy; x2 = to.x;               y2 = tcy; }
-      else        { x1 = from.x;              y1 = fcy; x2 = to.x + to.width; y2 = tcy; }
+      // Horizontal-dominant: spread exit/entry points along the vertical edge
+      const fOff = _edgeSpread(oi, outCount[edge.from], from.height * 0.3);
+      const tOff = _edgeSpread(ii, inCount[edge.to],    to.height   * 0.3);
+      if (dx > 0) { x1 = from.x + from.width; y1 = fcy + fOff; x2 = to.x;               y2 = tcy + tOff; }
+      else        { x1 = from.x;              y1 = fcy + fOff; x2 = to.x + to.width;    y2 = tcy + tOff; }
     }
 
     const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
@@ -450,5 +512,15 @@ function computeEdgePaths(edges, nodeMap) {
       : `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
 
     return { ...edge, path, x1, y1, x2, y2 };
-  }).filter(Boolean);
+  });
+}
+
+/**
+ * Spread offset: distribute `total` connection points evenly within ±maxHalfRange.
+ * Caps each step at 14px to avoid extreme spreading on high-degree nodes.
+ */
+function _edgeSpread(index, total, maxHalfRange) {
+  if (total <= 1) return 0;
+  const step = Math.min((maxHalfRange * 2) / (total - 1), 14);
+  return (index - (total - 1) / 2) * step;
 }

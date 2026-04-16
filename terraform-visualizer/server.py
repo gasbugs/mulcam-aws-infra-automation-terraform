@@ -124,6 +124,15 @@ def api_project():
             "zone": "side",
         })
 
+    # Build module file metadata for /api/source
+    modules_meta = {
+        m["name"]: {
+            "file": m.get("file", ""),
+            "file_path": os.path.join(project_dir, m.get("file", "")) if m.get("file") else "",
+        }
+        for m in parsed.get("modules", [])
+    }
+
     result = {
         "path": path,
         "resources": annotated,
@@ -131,6 +140,7 @@ def api_project():
         "data_sources": annotated_data,
         "edges": edges,
         "warnings": parsed.get("warnings", []),
+        "_modules_meta": modules_meta,
         "stats": {
             "total_resources": len(annotated),
             "total_modules": len(annotated_modules),
@@ -156,9 +166,47 @@ def api_source():
     if cache_key not in _cache:
         return jsonify({"error": "project not loaded — view it first"}), 404
 
-    cached_resources = _cache[cache_key]["data"].get("resources", [])
-    resource = next((r for r in cached_resources if r["id"] == resource_id), None)
+    cached_data = _cache[cache_key]["data"]
+    parts = resource_id.split('.')
 
+    # ── Module stub: "module.vpc" (exactly two parts) ──────────────────
+    if parts[0] == 'module' and len(parts) == 2:
+        mod_name = parts[1]
+        modules_meta = cached_data.get("_modules_meta", {})
+        mod_info = modules_meta.get(mod_name, {})
+        file_path = mod_info.get("file_path", "")
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({"error": f"module definition file not found for '{mod_name}'"}), 404
+        with open(file_path, 'r') as f:
+            content = f.read()
+        block = _extract_hcl_block(content, 'module', mod_name, None)
+        return jsonify({
+            "id": resource_id,
+            "file": os.path.relpath(file_path, REPO_ROOT),
+            "source": block or f"# Could not extract module block for '{mod_name}'",
+        })
+
+    # ── Data source: "data.type.name" ──────────────────────────────────
+    if parts[0] == 'data' and len(parts) >= 3:
+        cached_resources = cached_data.get("resources", [])
+        resource = next((r for r in cached_resources if r["id"] == resource_id), None)
+        if not resource:
+            return jsonify({"error": "data source not found"}), 404
+        file_path = resource.get("file_path", "")
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({"error": "source file not found"}), 404
+        with open(file_path, 'r') as f:
+            content = f.read()
+        block = _extract_hcl_block(content, 'data', parts[1], parts[2])
+        return jsonify({
+            "id": resource_id,
+            "file": os.path.relpath(file_path, REPO_ROOT),
+            "source": block or f"# Could not extract block from {os.path.basename(file_path)}",
+        })
+
+    # ── Regular or module-expanded resource ────────────────────────────
+    cached_resources = cached_data.get("resources", [])
+    resource = next((r for r in cached_resources if r["id"] == resource_id), None)
     if not resource:
         return jsonify({"error": "resource not found"}), 404
 
@@ -169,16 +217,9 @@ def api_source():
     with open(file_path, 'r') as f:
         content = f.read()
 
-    # Parse resource id to get type and name for block extraction
-    parts = resource_id.split('.')
-    if resource_id.startswith('data.') and len(parts) >= 3:
-        res_type, res_name = parts[1], parts[2]
-        block = _extract_hcl_block(content, 'data', res_type, res_name)
-    else:
-        # Last two segments are always type.name
-        res_type, res_name = parts[-2], parts[-1]
-        block = _extract_hcl_block(content, 'resource', res_type, res_name)
-
+    # Last two dot-segments are always resource_type.resource_name
+    res_type, res_name = parts[-2], parts[-1]
+    block = _extract_hcl_block(content, 'resource', res_type, res_name)
     return jsonify({
         "id": resource_id,
         "file": os.path.relpath(file_path, REPO_ROOT),
@@ -187,9 +228,11 @@ def api_source():
 
 
 def _extract_hcl_block(content, block_type, res_type, res_name):
-    """Extract a specific resource or data block from HCL file content."""
+    """Extract a specific resource, data, or module block from HCL file content."""
     import re
-    if block_type == 'data':
+    if block_type == 'module':
+        pattern = rf'module\s+"?{re.escape(res_type)}"?\s*\{{'
+    elif block_type == 'data':
         pattern = rf'data\s+"?{re.escape(res_type)}"?\s+"?{re.escape(res_name)}"?\s*\{{'
     else:
         pattern = rf'resource\s+"?{re.escape(res_type)}"?\s+"?{re.escape(res_name)}"?\s*\{{'

@@ -87,6 +87,7 @@ function renderDiagram(data, showDetails = false) {
       c.zone === 'database' ? 'container-database' :
       c.zone === 'external' ? 'container-external' :
       c.zone === 'side' ? 'container-side' :
+      c.zone === 'cicd' ? 'container-cicd' :
       'container-subnet-public';
 
     cg.append('rect')

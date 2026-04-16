@@ -454,6 +454,13 @@ body {
   stroke-dasharray: 6 3;
 }
 
+.container-cicd {
+  fill: #f0f4ff;
+  stroke: #3B48CC;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 3;
+}
+
 /* Module group boxes */
 .module-group-box {
   pointer-events: none;
