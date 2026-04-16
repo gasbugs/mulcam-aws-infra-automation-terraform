@@ -9,6 +9,7 @@ let currentRepoId = '';  // '' = main repo, non-empty = uploaded/github repo
 document.addEventListener('DOMContentLoaded', () => {
   initDiagram();
   loadProjects();
+  renderRecentCards();
 
   document.getElementById('search').addEventListener('input', onSearch);
   document.getElementById('btn-fit').addEventListener('click', () => {
@@ -160,6 +161,17 @@ async function selectProject(proj, element) {
     currentRepoId = proj.repo_id || '';
     resetExpandState();
     renderDiagram(data, showDetails);
+
+    // Save to recent projects
+    saveRecentProject({
+      path: proj.path,
+      name: proj.name || proj.path.split('/').pop(),
+      repo_id: proj.repo_id || null,
+      tf_files: proj.tf_files || 0,
+      has_modules: proj.has_modules || false,
+      resource_count: total,
+      visited_at: Date.now(),
+    });
 
     // Update legend
     updateLegend(data.stats.categories);
@@ -326,6 +338,108 @@ async function loadGithubRepo() {
     btn.disabled = false;
     btn.textContent = '가져오기';
   }
+}
+
+
+// ===== Recent Projects (localStorage) =====
+
+const RECENT_KEY = 'tf_visualizer_recent';
+const RECENT_MAX = 8;
+
+function saveRecentProject(proj) {
+  let recents = loadRecentProjects();
+  // Remove existing entry for same path+repo
+  recents = recents.filter(r => !(r.path === proj.path && r.repo_id === proj.repo_id));
+  recents.unshift(proj);
+  if (recents.length > RECENT_MAX) recents = recents.slice(0, RECENT_MAX);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recents));
+  } catch (_) {}
+  renderRecentCards();
+}
+
+function loadRecentProjects() {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+  } catch (_) {
+    return [];
+  }
+}
+
+function renderRecentCards() {
+  const recents = loadRecentProjects();
+  const section = document.getElementById('recent-section');
+  const container = document.getElementById('recent-cards');
+  if (!section || !container) return;
+
+  if (!recents.length) {
+    section.classList.add('hidden');
+    return;
+  }
+  section.classList.remove('hidden');
+  container.innerHTML = '';
+
+  recents.forEach(proj => {
+    const card = document.createElement('div');
+    card.className = 'recent-card';
+    const timeAgo = _timeAgo(proj.visited_at);
+    const label = proj.repo_id ? `📦 ${proj.name}` : proj.name;
+    const subpath = proj.path.split('/').slice(-3).join('/');
+    card.innerHTML = `
+      <div class="recent-card-icon">${_projectIcon(proj)}</div>
+      <div class="recent-card-body">
+        <div class="recent-card-name">${label}</div>
+        <div class="recent-card-path" title="${proj.path}">${subpath}</div>
+        <div class="recent-card-meta">
+          <span>${proj.resource_count || 0} resources</span>
+          <span>${timeAgo}</span>
+        </div>
+      </div>
+    `;
+    card.addEventListener('click', () => {
+      // If the project is from local repo (no repo_id), find sidebar item
+      if (!proj.repo_id) {
+        const sidebarItem = document.querySelector(`.project-item[data-path="${CSS.escape(proj.path)}"]`);
+        if (sidebarItem) {
+          // Expand parent group if collapsed
+          const group = sidebarItem.closest('.module-group');
+          group?.querySelector('.module-header')?.classList.remove('collapsed');
+          group?.querySelector('.project-list')?.classList.remove('collapsed');
+          sidebarItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          selectProject(proj, sidebarItem);
+          return;
+        }
+      }
+      // Fallback: load directly
+      const fakeEl = document.createElement('div');
+      fakeEl.className = 'project-item';
+      selectProject(proj, fakeEl);
+    });
+    container.appendChild(card);
+  });
+}
+
+function _projectIcon(proj) {
+  if (proj.repo_id) return '📦';
+  const name = proj.name || '';
+  if (/eks|k8s|kube/i.test(name)) return '⎈';
+  if (/ecs|fargate/i.test(name)) return '🐳';
+  if (/lambda|serverless/i.test(name)) return 'λ';
+  if (/vpc|network/i.test(name)) return '🌐';
+  if (/rds|db|database/i.test(name)) return '🗄';
+  if (/s3|storage/i.test(name)) return '🪣';
+  return '🏗';
+}
+
+function _timeAgo(ts) {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return '방금 전';
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  const day = Math.floor(hr / 24);
+  return `${day}일 전`;
 }
 
 

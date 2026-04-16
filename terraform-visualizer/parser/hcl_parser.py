@@ -19,6 +19,7 @@ def parse_tf_directory(directory):
     modules = []
     variables = {}
     locals_map = {}
+    provider_region_raw = None   # raw region string from provider "aws" block
     warnings = []
 
     tf_files = sorted([f for f in os.listdir(directory)
@@ -97,6 +98,19 @@ def parse_tf_directory(directory):
             if isinstance(local_block, dict):
                 locals_map.update(local_block)
 
+        # Extract provider "aws" region
+        if provider_region_raw is None:
+            for prov_block in parsed.get('provider', []):
+                aws_cfg = prov_block.get('aws')
+                if aws_cfg:
+                    cfg = aws_cfg[0] if isinstance(aws_cfg, list) else aws_cfg
+                    raw = cfg.get('region')
+                    if raw:
+                        provider_region_raw = _strip_quotes(str(raw))
+
+    # Resolve aws_region: provider value, then variable default fallback
+    aws_region = _resolve_aws_region(provider_region_raw, variables, locals_map)
+
     return {
         "resources": resources,
         "data_sources": data_sources,
@@ -104,7 +118,37 @@ def parse_tf_directory(directory):
         "variables": variables,
         "locals": locals_map,
         "warnings": warnings,
+        "aws_region": aws_region,
     }
+
+
+def _resolve_aws_region(provider_region_raw, variables, locals_map):
+    """Resolve the AWS region from provider config, with variable default fallback."""
+    import re
+    if not provider_region_raw:
+        # Check variables for a region-like default
+        for vname, vinfo in variables.items():
+            if 'region' in vname.lower():
+                default = vinfo.get('default')
+                if default and isinstance(default, str):
+                    return _strip_quotes(default)
+        return None
+
+    # Literal region string (e.g. "us-east-1")
+    if re.match(r'^[a-z]{2}-[a-z]+-\d$', provider_region_raw):
+        return provider_region_raw
+
+    # Variable reference: "${var.aws_region}" or "var.aws_region"
+    m = re.search(r'var\.(\w+)', provider_region_raw)
+    if m:
+        var_name = m.group(1)
+        vinfo = variables.get(var_name, {})
+        default = vinfo.get('default')
+        if default and isinstance(default, str):
+            return _strip_quotes(default)
+        return None
+
+    return None
 
 
 def _extract_count(config):

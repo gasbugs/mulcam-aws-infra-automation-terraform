@@ -80,15 +80,27 @@
         <button id="btn-zoom-out" title="축소 (-)">−</button>
       </div>
       <div id="welcome" class="welcome-screen">
-        <div class="welcome-content">
-          <svg width="80" height="80" viewBox="0 0 24 24" fill="none">
+        <div class="welcome-hero">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
             <path d="M1 3.5L8.5 8V17L1 12.5V3.5Z" fill="#7B42BC"/>
             <path d="M9.5 8L17 3.5V12.5L9.5 17V8Z" fill="#7B42BC"/>
             <path d="M9.5 18L17 13.5V22.5L9.5 27V18Z" fill="#7B42BC" opacity="0.5"/>
             <path d="M18 3.5L25.5 8V17L18 12.5V3.5Z" fill="#7B42BC" opacity="0.5"/>
           </svg>
-          <h2>Terraform Infrastructure Visualizer</h2>
-          <p>Select a project from the sidebar to visualize its AWS architecture</p>
+          <div>
+            <h2>Terraform Infrastructure Visualizer</h2>
+            <p>Visualize your AWS infrastructure from Terraform code</p>
+          </div>
+        </div>
+
+        <div id="recent-section" class="recent-section hidden">
+          <h3 class="recent-title">최근 프로젝트</h3>
+          <div id="recent-cards" class="recent-cards"></div>
+        </div>
+
+        <div class="welcome-hint">
+          <span>← 사이드바에서 프로젝트를 선택하거나</span>
+          <span>ZIP 업로드 · GitHub URL로 시작하세요</span>
         </div>
       </div>
     </div>

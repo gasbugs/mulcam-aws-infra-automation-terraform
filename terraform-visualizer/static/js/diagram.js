@@ -201,11 +201,13 @@ function renderDiagram(data, showDetails = false) {
       c.zone === 'public' ? 'container-subnet-public' :
       c.zone === 'private' ? 'container-subnet-private' :
       c.zone === 'database' ? 'container-database' :
+      c.zone === 'sg_orphan' ? 'container-sg-orphan' :
       c.zone === 'external' ? 'container-external' :
       c.zone === 'side' ? 'container-side' :
       c.zone === 'cicd' ? 'container-cicd' :
       c.zone === 'pipeline' ? 'container-pipeline' :
-      'container-subnet-public';
+      c.zone === 'registry' ? 'container-registry' :
+      'container-subnet-private';
 
     const rectEl = cg.append('rect')
       .attr('class', cssClass)
@@ -231,6 +233,16 @@ function renderDiagram(data, showDetails = false) {
 
     if (c.isDefaultVPC) {
       labelEl.style('fill', '#EF4444').style('font-weight', '700');
+    }
+
+    // Region badge on VPC container
+    if (c.isVPC && data.aws_region) {
+      cg.append('text')
+        .attr('class', 'region-badge')
+        .attr('x', c.x + c.width - 12)
+        .attr('y', c.y + 34)
+        .attr('text-anchor', 'end')
+        .text(`\uD83C\uDF10 ${data.aws_region}`);
     }
   });
 
@@ -357,6 +369,30 @@ function renderDiagram(data, showDetails = false) {
       });
     }
 
+    // Public IP badge — blue circle at top-left
+    if (node.public_ip_status) {
+      const isAssigned = node.public_ip_status === 'assigned';
+      const R = 9;
+      const ipBadge = g.append('g')
+        .attr('class', 'public-ip-badge')
+        .attr('transform', `translate(${R + 4}, ${R + 4})`);
+      ipBadge.append('circle')
+        .attr('cx', 0).attr('cy', 0).attr('r', R)
+        .attr('fill', isAssigned ? '#2563EB' : 'none')
+        .attr('stroke', '#2563EB')
+        .attr('stroke-width', isAssigned ? 0 : 2)
+        .attr('stroke-dasharray', isAssigned ? 'none' : '3 2')
+        .attr('opacity', 0.9);
+      // IP icon: globe lines
+      ipBadge.append('text')
+        .attr('x', 0).attr('y', 4)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 9)
+        .attr('font-weight', '700')
+        .attr('fill', isAssigned ? '#fff' : '#2563EB')
+        .text('IP');
+    }
+
     // Count badge
     if (node.count && typeof node.count === 'number' && node.count > 1) {
       const badge = g.append('g').attr('transform', `translate(${node.width - 20}, 4)`);
@@ -388,8 +424,8 @@ function renderDiagram(data, showDetails = false) {
     if (node.attached_sgs && node.attached_sgs.length > 0) {
       const SG_ROW_H = 22;
       const PAD_X = 8;
-      // SG section starts right after the base node content (at NODE_H offset)
-      const sgSectionY = node.height - node.attached_sgs.length * SG_ROW_H;
+      // SG section starts at the base node height (fixed, not derived from total height)
+      const sgSectionY = 116; // = L.NODE_H
 
       // Separator line between resource content and SG badges
       g.append('line')
@@ -432,6 +468,57 @@ function renderDiagram(data, showDetails = false) {
           .attr('class', 'sg-badge-label')
           .attr('x', 20).attr('y', 12.5)
           .attr('font-size', 10).attr('fill', '#C41B2E').attr('font-weight', '600')
+          .text(truncName);
+      });
+    }
+
+    // EBS volume badges — rendered below SG badges inside the node card
+    if (node.attached_ebs && node.attached_ebs.length > 0) {
+      const ROW_H = 22;
+      const PAD_X = 8;
+      const sgCount = (node.attached_sgs || []).length;
+      // EBS section starts right after SG section (or at base NODE_H if no SGs)
+      const ebsSectionY = 116 + sgCount * ROW_H + (sgCount > 0 ? 0 : 0);
+
+      if (sgCount === 0) {
+        // separator only if no SG section above
+        g.append('line')
+          .attr('x1', PAD_X).attr('y1', ebsSectionY - 2)
+          .attr('x2', node.width - PAD_X).attr('y2', ebsSectionY - 2)
+          .attr('stroke', '#3F862444').attr('stroke-width', 1);
+      }
+
+      g.append('text')
+        .attr('x', PAD_X + 2).attr('y', ebsSectionY + 8)
+        .attr('font-size', 7).attr('fill', '#3F862499').attr('font-weight', '700')
+        .text('EBS Volumes');
+
+      node.attached_ebs.forEach((ebs, i) => {
+        const by = ebsSectionY + 12 + i * ROW_H;
+        const bw = node.width - PAD_X * 2;
+        const ebsG = g.append('g')
+          .attr('class', 'ebs-badge')
+          .attr('transform', `translate(${PAD_X}, ${by})`)
+          .style('cursor', 'pointer')
+          .on('click', (event) => {
+            event.stopPropagation();
+            fetchAndShowCode({ id: ebs.id, file: ebs.file, type: 'aws_ebs_volume', name: ebs.name });
+          });
+
+        ebsG.append('rect')
+          .attr('width', bw).attr('height', ROW_H - 4).attr('rx', 3)
+          .attr('fill', '#3F862418').attr('stroke', '#3F862466').attr('stroke-width', 1);
+
+        ebsG.append('text')
+          .attr('x', 5).attr('y', 12)
+          .attr('font-size', 11).attr('fill', '#3F8624')
+          .text('💾');
+
+        const maxCh = Math.floor((bw - 22) / 7);
+        const truncName = ebs.name.length > maxCh ? ebs.name.slice(0, maxCh - 1) + '…' : ebs.name;
+        ebsG.append('text')
+          .attr('x', 20).attr('y', 12.5)
+          .attr('font-size', 10).attr('fill', '#2D6318').attr('font-weight', '600')
           .text(truncName);
       });
     }
@@ -497,7 +584,7 @@ function fitToView(layout) {
   if (!layout) return;
   const svgEl = document.getElementById('diagram');
   const rect = svgEl.getBoundingClientRect();
-  const padFraction = 0.92;
+  const padFraction = 1.1;
 
   const scaleX = (rect.width * padFraction) / layout.width;
   const scaleY = (rect.height * padFraction) / layout.height;
@@ -688,6 +775,9 @@ function showTooltip(event, node) {
   if (node.from_module) detail.push(`Module: ${node.from_module}`);
   if (node.count && node.count !== 1) detail.push(`Count: ${node.count}`);
   if (node.for_each) detail.push('Dynamic: for_each');
+  if (node.public_ip_status === 'assigned') detail.push('🌐 공인 IP 할당됨');
+  else if (node.public_ip_status === 'likely') detail.push('🌐 공인 IP 가능성 있음 (Default VPC)');
+
 
   tooltip.innerHTML = `
     <div class="tt-type">${type}</div>

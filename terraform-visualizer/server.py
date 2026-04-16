@@ -165,11 +165,184 @@ def api_project():
             role = "general"       # 일반 오브젝트 스토리지 → external 존
         _s3_roles[sid] = role
 
+    # Determine which SGs are "attached" (appear as badge on at least one resource)
+    attached_sg_ids = {
+        sg["id"]
+        for sgs in attached_sgs_map.values()
+        for sg in sgs
+    }
+
+    # Build attached_ebs: EC2 instance id → list of {id, name, file}
+    # Linked via aws_volume_attachment which references both instance_id and volume_id
+    ebs_info_map = {
+        res["id"]: {"id": res["id"], "name": res["name"], "file": res.get("file", "")}
+        for res in active_resources
+        if res["type"] == "aws_ebs_volume"
+    }
+    ec2_ids = {res["id"] for res in active_resources if res["type"] == "aws_instance"}
+
+    attached_ebs_map = {}
+    for res in active_resources:
+        if res["type"] != "aws_volume_attachment":
+            continue
+        connected_ec2, connected_ebs = None, None
+        for edge in edges:
+            if edge["from"] == res["id"]:
+                other = edge["to"]
+            elif edge["to"] == res["id"]:
+                other = edge["from"]
+            else:
+                continue
+            if other in ec2_ids:
+                connected_ec2 = other
+            elif other in ebs_info_map:
+                connected_ebs = other
+        if connected_ec2 and connected_ebs:
+            lst = attached_ebs_map.setdefault(connected_ec2, [])
+            info = ebs_info_map[connected_ebs]
+            if not any(x["id"] == info["id"] for x in lst):
+                lst.append(info)
+
+    # Check if project uses default VPC infrastructure (default_vpc / default_subnet resources)
+    _default_subnet_ids = {
+        r["id"] for r in active_resources if r["type"] == "aws_default_subnet"
+    }
+    _uses_default_vpc = any(
+        r["type"] in ("aws_default_vpc", "aws_default_subnet")
+        for r in active_resources
+    )
+
+    # Compute types that could be placed in the default VPC
+    _COMPUTE_TYPES = {
+        "aws_instance", "aws_launch_template", "aws_autoscaling_group",
+        "aws_ecs_service", "aws_ecs_task_definition",
+        "aws_eks_cluster", "aws_eks_node_group",
+        "aws_lb", "aws_alb",
+    }
+
+    # ── Public IP status detection ──────────────────────────────────────────
+    # Build set of resource IDs that have an EIP edge (aws_eip → resource or resource → aws_eip)
+    _eip_ids = {r["id"] for r in active_resources if r["type"] == "aws_eip"}
+    _eip_attached_to = set()          # resource IDs with an EIP attached
+    for _edge in edges:
+        if _edge["from"] in _eip_ids:
+            _eip_attached_to.add(_edge["to"])
+        if _edge["to"] in _eip_ids:
+            _eip_attached_to.add(_edge["from"])
+
+    # Subnets that auto-assign public IPs (map_public_ip_on_launch = true)
+    _public_subnet_ids = set()
+    for r in active_resources:
+        if r["type"] in ("aws_subnet", "aws_default_subnet"):
+            cfg = r.get("config", {})
+            if cfg.get("map_public_ip_on_launch") is True:
+                _public_subnet_ids.add(r["id"])
+
+    def _detect_public_ip(res, res_id):
+        """Return 'assigned', 'likely', or None.
+
+        'assigned' — confirmed: EIP attached, or associate_public_ip_address=true,
+                     or LB internet-facing, or RDS publicly_accessible
+        'likely'   — probable: default VPC instance with no explicit override,
+                     or in a subnet with map_public_ip_on_launch
+        None       — internal / unknown
+        """
+        rtype = res["type"]
+        config = res.get("config", {})
+
+        # 1. Direct EIP attachment (aws_eip → this resource)
+        if res_id in _eip_attached_to:
+            return "assigned"
+
+        # 2. associate_public_ip_address = true in resource config
+        assoc = config.get("associate_public_ip_address")
+        if assoc is True or str(assoc).lower() in ("true", "1"):
+            return "assigned"
+
+        # 3. network_interface block with associate_public_ip_address = true
+        ni = config.get("network_interface", [])
+        if isinstance(ni, dict):
+            ni = [ni]
+        if isinstance(ni, list):
+            for ni_block in ni:
+                if isinstance(ni_block, dict):
+                    a = ni_block.get("associate_public_ip_address")
+                    if a is True or str(a).lower() in ("true", "1"):
+                        return "assigned"
+
+        # 4. RDS publicly_accessible
+        if rtype in ("aws_db_instance", "aws_rds_cluster", "aws_rds_cluster_instance"):
+            pub = config.get("publicly_accessible")
+            if pub is True or str(pub).lower() in ("true", "1"):
+                return "assigned"
+            return None   # explicit false or omitted → internal by default
+
+        # 5. Load Balancer: internet-facing by default (internal=false or absent → public)
+        if rtype in ("aws_lb", "aws_alb"):
+            internal = config.get("internal")
+            if internal is True or str(internal).lower() == "true":
+                return None   # internal ALB
+            return "assigned"   # internet-facing (default)
+
+        # 6. NAT Gateway always has a public EIP (even if not yet resolved via edges)
+        if rtype == "aws_nat_gateway":
+            return "assigned"
+
+        # 7. Instance in a subnet with map_public_ip_on_launch
+        if rtype == "aws_instance":
+            sid_ref = str(config.get("subnet_id", ""))
+            for psid in _public_subnet_ids:
+                if psid in sid_ref:
+                    return "likely"
+
+        # 8. Default VPC: compute resources get a public IP unless explicitly set to false
+        if _uses_default_vpc and rtype in (
+            "aws_instance", "aws_autoscaling_group", "aws_launch_template"
+        ):
+            # Only if associate_public_ip_address is not explicitly false
+            if assoc is not False and str(assoc).lower() != "false":
+                return "likely"
+
+        return None
+
+    def _detect_subnet_placement(config, resource_type=None):
+        """Return 'public' or 'private' based on subnet reference strings, or None."""
+        refs = []
+        for key in ('subnet_id', 'subnet_ids', 'subnets', 'subnet'):
+            val = config.get(key)
+            if val is None:
+                continue
+            if isinstance(val, list):
+                refs.extend(str(v) for v in val)
+            else:
+                refs.append(str(val))
+        ref_str = ' '.join(refs).lower()
+        if ref_str:
+            # explicit "default" subnet reference → public (default VPC subnets are public)
+            if 'default' in ref_str:
+                return 'public'
+            if 'public' in ref_str:
+                return 'public'
+            if 'private' in ref_str:
+                return 'private'
+        else:
+            # No subnet specified: if project uses default VPC and resource is compute → public
+            if _uses_default_vpc and resource_type in _COMPUTE_TYPES:
+                return 'public'
+        return None
+
     # Annotate resources with visual metadata
     annotated = []
     for res in active_resources:
         file_dir = res.get("file_dir", project_dir)
         file_name = res.get("file", "")
+        is_sg = res["type"] == "aws_security_group"
+        # SGs from a module are associated with that module — not orphan
+        sg_orphan = is_sg and res["id"] not in attached_sg_ids and not res.get("from_module")
+        # Orphan SGs are normally hidden but we surface them as a separate visual zone
+        hidden = is_hidden(res["type"]) and not sg_orphan
+        subnet_placement = _detect_subnet_placement(res.get("config", {}), res["type"])
+        public_ip_status = _detect_public_ip(res, res["id"])
         annotated.append({
             "id": res["id"],
             "type": res["type"],
@@ -184,10 +357,14 @@ def api_project():
             "file_path": os.path.join(file_dir, file_name) if file_name else "",
             "from_module": res.get("from_module"),
             "module_source": res.get("module_source", ""),
-            "hidden": is_hidden(res["type"]),
+            "hidden": hidden,
             "structural": is_structural(res["type"]),
             "attached_sgs": attached_sgs_map.get(res["id"], []),
+            "attached_ebs": attached_ebs_map.get(res["id"], []),
             "s3_role": _s3_roles.get(res["id"], ""),
+            "sg_orphan": sg_orphan,
+            "subnet_placement": subnet_placement,
+            "public_ip_status": public_ip_status,
         })
 
     # Annotate stub modules (ones we couldn't fully expand)
@@ -229,6 +406,7 @@ def api_project():
 
     result = {
         "path": path,
+        "aws_region": parsed.get("aws_region"),
         "resources": annotated,
         "registry_modules": annotated_modules,
         "data_sources": annotated_data,

@@ -292,6 +292,8 @@ HIDDEN_TYPES = {
     # ASG plumbing
     "aws_autoscaling_policy", "aws_autoscaling_attachment",
     "aws_autoscaling_schedule",
+    # EBS is shown as a badge inside the attached EC2 instance, not as a standalone node
+    "aws_ebs_volume", "aws_volume_attachment",
     # Security group is shown as a badge on the attached resource, not as a standalone node
     "aws_security_group",
     "aws_security_group_rule",
