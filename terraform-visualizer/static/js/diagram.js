@@ -53,14 +53,27 @@ function initDiagram() {
       .attr('fill', colors[type] || '#9ca3af');
   });
 
-  // Zoom behavior
+  // Zoom behavior — disable double-click zoom
   zoom = d3.zoom()
     .scaleExtent([0.1, 3])
+    .filter((event) => {
+      // Allow wheel zoom and drag pan, but block double-click zoom
+      if (event.type === 'dblclick') return false;
+      return !event.ctrlKey && !event.button;
+    })
     .on('zoom', (event) => {
       rootG.attr('transform', event.transform);
     });
 
   svg.call(zoom);
+
+  // +/- zoom buttons
+  document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
+    svg.transition().duration(250).call(zoom.scaleBy, 1.3);
+  });
+  document.getElementById('btn-zoom-out')?.addEventListener('click', () => {
+    svg.transition().duration(250).call(zoom.scaleBy, 1 / 1.3);
+  });
 
   // Background click → deselect (check that click is NOT on a node or badge)
   svg.node().addEventListener('click', (event) => {
