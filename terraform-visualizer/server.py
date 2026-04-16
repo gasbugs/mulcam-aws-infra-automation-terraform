@@ -115,6 +115,56 @@ def api_project():
             if not any(x["id"] == info["id"] for x in lst):
                 lst.append(info)
 
+    # Detect S3 bucket roles based on edge connections
+    # Each S3 bucket is classified by how it's actually used in the architecture
+    _S3_CDN_TYPES = frozenset({
+        'aws_cloudfront_distribution', 'aws_cloudfront_origin_access_control',
+        'aws_cloudfront_origin_access_identity',
+    })
+    _S3_CICD_TYPES = frozenset({
+        'aws_codepipeline', 'aws_codebuild_project',
+    })
+    _S3_LAMBDA_TYPES = frozenset({
+        'aws_lambda_function', 'aws_lambda_layer_version',
+    })
+    _S3_LOG_TYPES = frozenset({
+        'aws_lb', 'aws_alb', 'aws_cloudtrail', 'aws_flow_log',
+        'aws_kinesis_firehose_delivery_stream', 'aws_config_delivery_channel',
+        'aws_cloudwatch_log_group',
+    })
+    _S3_API_TYPES = frozenset({
+        'aws_api_gateway_rest_api', 'aws_apigatewayv2_api',
+    })
+
+    _res_id_to_type = {r["id"]: r["type"] for r in active_resources}
+    _s3_roles = {}
+    for res in active_resources:
+        if res["type"] != "aws_s3_bucket":
+            continue
+        sid = res["id"]
+        connected = set()
+        for edge in edges:
+            if edge["from"] == sid:
+                connected.add(_res_id_to_type.get(edge["to"], ""))
+            if edge["to"] == sid:
+                connected.add(_res_id_to_type.get(edge["from"], ""))
+
+        name_lower = res["name"].lower()
+        if connected & _S3_CDN_TYPES:
+            role = "cdn"           # CloudFront 오리진 버킷 → external 존 (CDN 패널)
+        elif connected & _S3_CICD_TYPES:
+            role = "artifact"      # CI/CD 파이프라인 아티팩트 → cicd 존
+        elif connected & _S3_LAMBDA_TYPES:
+            role = "lambda"        # Lambda 배포 패키지 → private 존 (Lambda 옆)
+        elif connected & _S3_API_TYPES:
+            role = "api"           # API Gateway 관련 → private 존
+        elif (connected & _S3_LOG_TYPES or
+              any(kw in name_lower for kw in ("log", "logging", "audit", "trail", "access-log", "accesslog"))):
+            role = "log"           # 로그 저장소 → side 존 (모니터링 옆)
+        else:
+            role = "general"       # 일반 오브젝트 스토리지 → external 존
+        _s3_roles[sid] = role
+
     # Annotate resources with visual metadata
     annotated = []
     for res in active_resources:
@@ -137,6 +187,7 @@ def api_project():
             "hidden": is_hidden(res["type"]),
             "structural": is_structural(res["type"]),
             "attached_sgs": attached_sgs_map.get(res["id"], []),
+            "s3_role": _s3_roles.get(res["id"], ""),
         })
 
     # Annotate stub modules (ones we couldn't fully expand)

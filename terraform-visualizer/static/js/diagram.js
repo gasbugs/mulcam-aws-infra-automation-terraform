@@ -316,13 +316,24 @@ function renderDiagram(data, showDetails = false) {
       .attr('transform', `translate(${iconX}, 8)`);
     renderIcon(iconG, node.icon || 'generic', iconSize);
 
-    // Resource type label
-    const typeLabel = isModule ? 'module' : _shortType(node.type);
-    g.append('text')
+    // Resource type label — S3 shows context-aware role label
+    const _s3RoleLabel = { cdn: 'CDN Origin', artifact: 'Artifact Store',
+      lambda: 'Lambda Code', api: 'API Storage', log: 'Log Storage', general: 'S3 Bucket' };
+    const typeLabel = isModule ? 'module'
+      : (node.type === 'aws_s3_bucket' && node.s3_role)
+        ? _s3RoleLabel[node.s3_role] || 'S3 Bucket'
+        : _shortType(node.type);
+    const typeLabelEl = g.append('text')
       .attr('class', 'node-label')
       .attr('x', node.width / 2)
       .attr('y', iconSize + 20)
       .text(typeLabel);
+    // Highlight S3 role label with role-specific color
+    if (node.type === 'aws_s3_bucket' && node.s3_role && node.s3_role !== 'general') {
+      const roleColors = { cdn: '#8C4FFF', artifact: '#3B48CC', lambda: '#ED7100',
+                           api: '#ED7100', log: '#6b7280' };
+      typeLabelEl.style('fill', roleColors[node.s3_role] || '#6b7280').style('font-weight', '600');
+    }
 
     // Resource name
     const displayName = _shortName(node.name || node.label || node.id);

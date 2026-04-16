@@ -472,8 +472,14 @@ function _classify(r) {
   if (r.category === 'cdn') return 'external';
   if (['aws_wafv2_web_acl', 'aws_wafv2_web_acl_association'].includes(t)) return 'external';
   if (t === 'aws_acm_certificate' || t === 'aws_acm_certificate_validation') return 'external';
-  // S3 is always external (user-facing), regardless of module origin
-  if (t === 'aws_s3_bucket') return 'external';
+  // S3: context-aware placement based on actual usage role
+  if (t === 'aws_s3_bucket') {
+    const role = r.s3_role;
+    if (role === 'artifact') return 'cicd';      // CI/CD 아티팩트 → 파이프라인 옆
+    if (role === 'lambda' || role === 'api') return 'private'; // Lambda/API 코드 → private
+    if (role === 'log') return 'side';            // 로그 저장소 → 모니터링 옆
+    return 'external';                            // cdn/general → 외부 서비스 패널
+  }
   // VPC-mounted storage (EFS, EBS, Backup) stays near the database zone
   if (['aws_efs_file_system', 'aws_ebs_volume', 'aws_volume_attachment',
        'aws_backup_plan', 'aws_backup_vault', 'aws_backup_selection'].includes(t)) return 'database';
