@@ -21,13 +21,21 @@ function initDiagram() {
     hideCodePanel();
   });
 
-  // Code panel: click on AWS resource reference → highlight that node
+  // Code panel: click on AWS resource reference → select that node + pan to it
   document.getElementById('code-panel-content')?.addEventListener('click', (e) => {
     const ref = e.target.closest('[data-ref]');
     if (!ref) return;
     const resourceId = ref.dataset.ref;
     const node = currentNodeMap[resourceId];
-    if (node) toggleHighlight(node);
+    if (!node) return;
+    // Deselect current first so toggleHighlight always re-selects the target
+    if (selectedNode && selectedNode !== node.id) {
+      selectedNode = null;
+      d3.selectAll('.resource-node').classed('highlighted', false).classed('dimmed', false);
+      d3.selectAll('.edge-line').classed('highlighted', false).classed('dimmed', false);
+    }
+    toggleHighlight(node);
+    panToNode(node);
   });
 
   // Defs for arrowheads
@@ -303,6 +311,24 @@ function renderDiagram(data, showDetails = false) {
     fitToView(layout);
     _needsFit = false;
   }
+}
+
+
+/** Smoothly pan the diagram to center on the given node, preserving current zoom scale. */
+function panToNode(node) {
+  if (!node) return;
+  const svgEl = document.getElementById('diagram');
+  const rect = svgEl.getBoundingClientRect();
+  const cx = node.x + node.width / 2;
+  const cy = node.y + node.height / 2;
+  const k = d3.zoomTransform(svg.node()).k;
+  // Center the node, but keep code panel height in mind (subtract ~150px from center)
+  const tx = rect.width / 2 - cx * k;
+  const ty = (rect.height - 150) / 2 - cy * k;
+  svg.transition().duration(400).call(
+    zoom.transform,
+    d3.zoomIdentity.translate(tx, ty).scale(k)
+  );
 }
 
 
