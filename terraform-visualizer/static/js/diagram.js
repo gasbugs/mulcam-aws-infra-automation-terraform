@@ -425,13 +425,14 @@ function renderDiagram(data, showDetails = false) {
       });
     }
 
-    // Expand badge (+N): show for nodes with hidden neighbors (only when !showDetails)
+    // Expand badge (+N): top-right corner, larger size
     const hiddenNbrs = hiddenNeighborSets[node.id];
     if (!showDetails && hiddenNbrs && hiddenNbrs.size > 0 && !isDetail) {
       const isExpanded = expandedNodeIds.has(node.id);
+      const R = 12;  // badge radius
       const badge = g.append('g')
         .attr('class', 'expand-badge')
-        .attr('transform', `translate(4, ${node.height - 20})`)
+        .attr('transform', `translate(${node.width - R - 4}, ${R + 4})`)
         .style('cursor', 'pointer')
         .on('click', (event) => {
           event.stopPropagation();
@@ -441,14 +442,14 @@ function renderDiagram(data, showDetails = false) {
         });
 
       badge.append('circle')
-        .attr('cx', 8).attr('cy', 8).attr('r', 8)
-        .attr('fill', isExpanded ? '#3B48CC' : '#9ca3af')
-        .attr('stroke', '#fff').attr('stroke-width', 1.5);
+        .attr('cx', 0).attr('cy', 0).attr('r', R)
+        .attr('fill', isExpanded ? '#3B48CC' : '#6b7280')
+        .attr('stroke', '#fff').attr('stroke-width', 2);
 
       badge.append('text')
-        .attr('x', 8).attr('y', 12.5)
+        .attr('x', 0).attr('y', isExpanded ? 5 : 4.5)
         .attr('text-anchor', 'middle')
-        .attr('font-size', isExpanded ? 11 : 8)
+        .attr('font-size', isExpanded ? 16 : 10)
         .attr('font-weight', '700')
         .attr('fill', '#fff')
         .text(isExpanded ? '−' : `+${hiddenNbrs.size}`);
