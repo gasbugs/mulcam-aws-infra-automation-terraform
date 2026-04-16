@@ -14,12 +14,7 @@ function initDiagram() {
   rootG = svg.append('g').attr('class', 'root');
 
   // Code panel close button
-  document.getElementById('code-panel-close')?.addEventListener('click', () => {
-    selectedNode = null;
-    d3.selectAll('.resource-node').classed('highlighted', false).classed('dimmed', false);
-    d3.selectAll('.edge-line').classed('highlighted', false).classed('dimmed', false);
-    hideCodePanel();
-  });
+  document.getElementById('code-panel-close')?.addEventListener('click', () => _clearSelection());
 
   // Code panel: click on AWS resource reference → select that node + pan to it
   document.getElementById('code-panel-content')?.addEventListener('click', (e) => {
@@ -67,15 +62,47 @@ function initDiagram() {
 
   svg.call(zoom);
 
-  // Click on SVG background → deselect / cancel highlight
-  svg.on('click', (event) => {
-    if (event.target === svg.node()) {
-      selectedNode = null;
-      d3.selectAll('.resource-node').classed('highlighted', false).classed('dimmed', false);
-      d3.selectAll('.edge-line').classed('highlighted', false).classed('dimmed', false);
-      hideCodePanel();
-    }
-  });
+  // Code panel resize handle
+  const resizeHandle = document.getElementById('code-panel-resize');
+  if (resizeHandle) {
+    let _resizing = false;
+    let _startY = 0;
+    let _startH = 0;
+
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      _resizing = true;
+      _startY = e.clientY;
+      const panel = document.getElementById('code-panel');
+      _startH = panel.offsetHeight;
+      resizeHandle.classList.add('dragging');
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!_resizing) return;
+      const panel = document.getElementById('code-panel');
+      const delta = _startY - e.clientY;  // drag up = increase height
+      const minH = parseInt(getComputedStyle(panel).minHeight) || 80;
+      const maxH = Math.floor(window.innerHeight * 0.8);
+      const newH = Math.min(maxH, Math.max(minH, _startH + delta));
+      panel.style.height = newH + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (_resizing) {
+        _resizing = false;
+        resizeHandle.classList.remove('dragging');
+      }
+    });
+  }
+}
+
+
+function _clearSelection() {
+  selectedNode = null;
+  d3.selectAll('.resource-node').classed('highlighted', false).classed('dimmed', false);
+  d3.selectAll('.edge-line').classed('highlighted', false).classed('dimmed', false);
+  hideCodePanel();
 }
 
 
@@ -90,6 +117,14 @@ function renderDiagram(data, showDetails = false) {
   currentData = data;
   selectedNode = null;
   rootG.selectAll('*').remove();
+
+  // Transparent full-canvas background rect to catch background clicks for deselect
+  rootG.append('rect')
+    .attr('class', 'diagram-bg')
+    .attr('x', -50000).attr('y', -50000)
+    .attr('width', 100000).attr('height', 100000)
+    .attr('fill', 'transparent')
+    .on('click', () => _clearSelection());
 
   // Pre-compute hidden neighbor sets for +N badges (before layout)
   const hiddenSet = new Set((data.resources || []).filter(r => r.hidden).map(r => r.id));

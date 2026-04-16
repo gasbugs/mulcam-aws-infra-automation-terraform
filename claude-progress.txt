@@ -1,0 +1,22 @@
+=== SESSION 1 — 2026-04-16 ===
+Agent: Initializer
+Goal: terraform-visualizer 웹 도구 기능 구현 (이전 세션에서 코어 완성, 이 세션부터 추가 기능 진행)
+
+Completed:
+  - ZIP 파일 업로드로 외부 Terraform 저장소 시각화 (server.py + app.js + index.html + style.css)
+  - GitHub 공개 저장소 URL 입력으로 자동 다운로드 후 시각화
+  - 사이드바에 업로드된 저장소 섹션 표시 및 제거 기능
+  - SVG 빈 공간 클릭 시 노드 하이라이트 해제 + 코드 패널 닫기 (diagram.js 투명 배경 rect)
+  - 코드 패널 상단 드래그 핸들로 패널 높이 조절 (min 80px, max 80vh)
+  - _clearSelection() 헬퍼 함수 추출로 선택 해제 로직 일원화
+
+Blocked:
+  - 없음
+
+Test Results:
+  - E2E 테스트 미작성 (UI 기능 위주라 수동 확인)
+
+Next Session Must:
+  - 다음 기능 진행: feature-list.json의 passes=false 항목 확인 후 작업
+  - 서버 실행: cd terraform-visualizer && python3 server.py --port 5001
+=== END SESSION 1 ===
