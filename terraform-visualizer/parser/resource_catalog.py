@@ -292,7 +292,8 @@ HIDDEN_TYPES = {
     # ASG plumbing
     "aws_autoscaling_policy", "aws_autoscaling_attachment",
     "aws_autoscaling_schedule",
-    # SG rules are always hidden (SG itself is now visible for traffic edges)
+    # Security group is shown as a badge on the attached resource, not as a standalone node
+    "aws_security_group",
     "aws_security_group_rule",
     "aws_vpc_security_group_ingress_rule",
     "aws_vpc_security_group_egress_rule",

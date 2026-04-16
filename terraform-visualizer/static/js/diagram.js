@@ -207,18 +207,31 @@ function renderDiagram(data, showDetails = false) {
       c.zone === 'pipeline' ? 'container-pipeline' :
       'container-subnet-public';
 
-    cg.append('rect')
+    const rectEl = cg.append('rect')
       .attr('class', cssClass)
       .attr('x', c.x).attr('y', c.y)
       .attr('width', c.width).attr('height', c.height)
       .attr('rx', c.isVPC ? 12 : 8);
 
+    // Default VPC: red dashed border to signal "using default VPC"
+    if (c.isDefaultVPC) {
+      rectEl
+        .style('stroke', '#EF4444')
+        .style('stroke-width', '2')
+        .style('stroke-dasharray', '8 4')
+        .style('fill', '#EF444408');
+    }
+
     // Zone label with icon indicator
-    cg.append('text')
+    const labelEl = cg.append('text')
       .attr('class', 'container-label')
       .attr('x', c.x + 16)
       .attr('y', c.y + (c.isVPC ? 34 : 27))
       .text(c.label);
+
+    if (c.isDefaultVPC) {
+      labelEl.style('fill', '#EF4444').style('font-weight', '700');
+    }
   });
 
   // Draw module group boxes (behind edges but above zone containers)
@@ -358,6 +371,49 @@ function renderDiagram(data, showDetails = false) {
         .attr('text-anchor', 'middle')
         .attr('font-size', 8)
         .text('N');
+    }
+
+    // Security Group badges — shown as shield icons below the node
+    if (node.attached_sgs && node.attached_sgs.length > 0) {
+      const sgBadgeW = 80;
+      const sgBadgeH = 16;
+      const sgStartX = (node.width - Math.min(node.attached_sgs.length, 2) * (sgBadgeW + 4)) / 2;
+
+      node.attached_sgs.slice(0, 2).forEach((sgName, i) => {
+        const bx = sgStartX + i * (sgBadgeW + 4);
+        const by = node.height + 4 + Math.floor(i / 2) * (sgBadgeH + 3);
+        const sgG = g.append('g')
+          .attr('class', 'sg-badge')
+          .attr('transform', `translate(${bx}, ${by})`);
+
+        sgG.append('rect')
+          .attr('width', sgBadgeW).attr('height', sgBadgeH).attr('rx', 3)
+          .attr('fill', '#DD344C22').attr('stroke', '#DD344C').attr('stroke-width', 0.8);
+
+        // Shield icon (tiny)
+        sgG.append('text')
+          .attr('x', 5).attr('y', 11.5)
+          .attr('font-size', 9).attr('fill', '#DD344C')
+          .text('🛡');
+
+        // SG name (truncated)
+        const truncName = sgName.length > 10 ? sgName.slice(0, 9) + '…' : sgName;
+        sgG.append('text')
+          .attr('class', 'sg-badge-label')
+          .attr('x', 16).attr('y', 11.5)
+          .attr('font-size', 9).attr('fill', '#DD344C').attr('font-weight', '600')
+          .text(truncName);
+      });
+
+      // If more than 2 SGs, show "+N more"
+      if (node.attached_sgs.length > 2) {
+        const extraG = g.append('g')
+          .attr('class', 'sg-badge')
+          .attr('transform', `translate(${sgStartX}, ${node.height + 4 + sgBadgeH + 3})`);
+        extraG.append('text')
+          .attr('font-size', 8).attr('fill', '#DD344C').attr('y', 10)
+          .text(`+${node.attached_sgs.length - 2} more`);
+      }
     }
 
     // Expand badge (+N): show for nodes with hidden neighbors (only when !showDetails)

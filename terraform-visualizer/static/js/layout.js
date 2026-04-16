@@ -75,6 +75,13 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
     (r.category === 'networking' && !r.hidden)
   ) || stubs.some(m => m.source?.includes('vpc'));
 
+  // Detect "default VPC" scenario: no VPC declared, but VPC-internal resources exist
+  const vpcInternalTypes = new Set(['compute', 'database', 'container', 'loadbalancing', 'security']);
+  const hasVpcInternalResources = allResources.some(r =>
+    !r.hidden && vpcInternalTypes.has(r.category)
+  );
+  const isDefaultVPC = !hasVPC && hasVpcInternalResources;
+
   // Classify into zones
   const zones = {
     external: [],   // CloudFront, Route53, S3, WAF, API GW, ACM
@@ -370,14 +377,15 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
   }
 
   // VPC
-  if (hasVPC) {
+  if (hasVPC || isDefaultVPC) {
     containers.push({
       id: 'vpc-container',
       zone: 'vpc',
       x: vpcX, y: vpcY,
       width: vpcW, height: vpcH,
-      label: 'VPC',
+      label: isDefaultVPC ? 'VPC (Default)' : 'VPC',
       isVPC: true,
+      isDefaultVPC,
     });
   }
 

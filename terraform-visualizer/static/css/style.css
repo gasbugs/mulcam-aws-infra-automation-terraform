@@ -480,6 +480,10 @@ body {
   fill: #fff;
 }
 
+.sg-badge-label {
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+
 .edge-line {
   fill: none;
   stroke-width: 1.5;
