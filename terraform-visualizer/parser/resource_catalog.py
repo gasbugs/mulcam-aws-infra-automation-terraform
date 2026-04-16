@@ -280,8 +280,7 @@ HIDDEN_TYPES = {
     # Subnet groups (implicit when DB resources exist)
     "aws_db_subnet_group", "aws_elasticache_subnet_group",
     "aws_redshift_subnet_group",
-    # IAM — roles/policies are implicit in large module stacks; shown in detail view
-    "aws_iam_role", "aws_iam_policy",
+    # IAM plumbing (role/policy themselves are now shown for permission edges)
     "aws_iam_role_policy_attachment", "aws_iam_role_policy",
     "aws_iam_instance_profile",
     "aws_iam_openid_connect_provider",
@@ -293,8 +292,7 @@ HIDDEN_TYPES = {
     # ASG plumbing
     "aws_autoscaling_policy", "aws_autoscaling_attachment",
     "aws_autoscaling_schedule",
-    # Security groups (shown as detail; SG rules are always hidden)
-    "aws_security_group",
+    # SG rules are always hidden (SG itself is now visible for traffic edges)
     "aws_security_group_rule",
     "aws_vpc_security_group_ingress_rule",
     "aws_vpc_security_group_egress_rule",
@@ -306,12 +304,8 @@ HIDDEN_TYPES = {
     "aws_s3_bucket_acl", "aws_s3_bucket_versioning",
     "aws_s3_bucket_server_side_encryption_configuration",
     "aws_s3_bucket_cors_configuration", "aws_s3_bucket_website_configuration",
-    # LB listener/target group (ALB itself is shown)
-    "aws_lb_listener", "aws_alb_listener",
-    "aws_lb_target_group", "aws_alb_target_group",
+    # LB listener rule (listener/target group are now visible for traffic edges)
     "aws_lb_listener_rule",
-    # Launch template (ASG is shown)
-    "aws_launch_template",
     # EKS configuration plumbing (cluster/nodegroup are shown; config detail hidden)
     "aws_eks_addon", "aws_eks_access_entry", "aws_eks_access_policy_association",
     "aws_eks_identity_provider_config",
