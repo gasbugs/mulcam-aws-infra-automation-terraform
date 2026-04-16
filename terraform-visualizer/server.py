@@ -311,16 +311,16 @@ def api_github():
         return jsonify({"error": "url is required"}), 400
 
     try:
-        user, repo, branch = _parse_github_url(url)
+        user, repo, branch, subpath = _parse_github_url(url)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    # Try HEAD (default branch) first, then explicit branch
-    candidates = [
-        f"https://github.com/{user}/{repo}/archive/HEAD.zip",
-    ]
+    # Build download URL candidates (prefer specific branch, fallback to HEAD)
+    candidates = []
     if branch and branch not in ('main', 'master'):
-        candidates.insert(0, f"https://github.com/{user}/{repo}/archive/refs/heads/{branch}.zip")
+        candidates.append(f"https://github.com/{user}/{repo}/archive/refs/heads/{branch}.zip")
+    candidates.append(f"https://github.com/{user}/{repo}/archive/refs/heads/{branch or 'main'}.zip")
+    candidates.append(f"https://github.com/{user}/{repo}/archive/HEAD.zip")
 
     repo_id = uuid.uuid4().hex[:10]
     extract_dir = os.path.join(UPLOAD_DIR, repo_id)
@@ -348,10 +348,22 @@ def api_github():
         shutil.rmtree(extract_dir, ignore_errors=True)
         return jsonify({"error": f"Failed to download repository: {last_err}"}), 400
 
+    # Navigate to repo root (usually extracted as repo-branch/)
     actual_root = _find_root(extract_dir)
+
+    # Navigate into subpath if specified (e.g. modules/module-1)
+    if subpath:
+        sub = os.path.join(actual_root, subpath)
+        if os.path.isdir(sub):
+            actual_root = sub
+        else:
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            return jsonify({"error": f"Subpath '{subpath}' not found in repository"}), 400
+
     _upload_repos[repo_id] = actual_root
     modules = scan_projects(actual_root)
-    return jsonify({"repo_id": repo_id, "name": f"{user}/{repo}", "modules": modules})
+    display_name = f"{user}/{repo}" + (f"/{subpath}" if subpath else "")
+    return jsonify({"repo_id": repo_id, "name": display_name, "modules": modules})
 
 
 @app.route('/api/repo/remove', methods=['POST'])
@@ -385,19 +397,30 @@ def _find_root(extract_dir):
 
 
 def _parse_github_url(url):
-    """Return (user, repo, branch) from a GitHub URL string."""
+    """Return (user, repo, branch, subpath) from a GitHub URL string.
+
+    Handles:
+      https://github.com/user/repo
+      https://github.com/user/repo/tree/branch
+      https://github.com/user/repo/tree/branch/path/to/subdir
+      user/repo
+      user/repo@branch
+    """
     import re
     url = re.sub(r'^https?://github\.com/', '', url.strip().rstrip('/'))
-    # user/repo/tree/branch  or  user/repo@branch  or  user/repo
-    tree_m = re.match(r'^([^/]+)/([^/@]+)/tree/(.+)$', url)
+    # user/repo/tree/branch[/subpath...]
+    # branch is the first path segment after 'tree/', rest is subpath
+    tree_m = re.match(r'^([^/]+)/([^/@]+)/tree/([^/]+)(/.*)?$', url)
     if tree_m:
-        return tree_m.group(1), tree_m.group(2), tree_m.group(3)
+        branch = tree_m.group(3)
+        subpath = tree_m.group(4).strip('/') if tree_m.group(4) else ''
+        return tree_m.group(1), tree_m.group(2), branch, subpath
     at_m = re.match(r'^([^/]+)/([^@]+)@(.+)$', url)
     if at_m:
-        return at_m.group(1), at_m.group(2), at_m.group(3)
+        return at_m.group(1), at_m.group(2), at_m.group(3), ''
     plain_m = re.match(r'^([^/]+)/([^/]+)$', url)
     if plain_m:
-        return plain_m.group(1), plain_m.group(2), 'main'
+        return plain_m.group(1), plain_m.group(2), '', ''
     raise ValueError(f"Cannot parse GitHub URL: {url!r}. Expected: user/repo or https://github.com/user/repo")
 
 
