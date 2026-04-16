@@ -168,7 +168,7 @@ function renderDiagram(data, showDetails = false) {
       .style('stroke-dasharray', isData ? '4 2' : undefined);
 
     // Icon
-    const iconSize = 36;
+    const iconSize = 48;
     const iconX = (node.width - iconSize) / 2;
     const iconG = g.append('g')
       .attr('transform', `translate(${iconX}, 8)`);

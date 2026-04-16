@@ -21,7 +21,7 @@
 
 const L = {
   NODE_W: 120,
-  NODE_H: 96,
+  NODE_H: 116,
   NODE_GAP_X: 32,
   NODE_GAP_Y: 32,
   ZONE_PAD_X: 40,
