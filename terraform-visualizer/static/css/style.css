@@ -461,6 +461,12 @@ body {
   stroke-dasharray: 6 3;
 }
 
+.container-pipeline {
+  fill: #e0e8ff;
+  stroke: #3B48CC;
+  stroke-width: 2;
+}
+
 /* Module group boxes */
 .module-group-box {
   pointer-events: none;

@@ -175,12 +175,32 @@ function computeLayout(data, showDetails = false) {
   }
 
   // ── Step 4b: CI/CD panel (below side panel) ───────────────────────
-  const cicdItems = zones.cicd;
-  let cicdW = 0;
-  let cicdH = 0;
-  if (cicdItems.length) {
-    cicdW = L.NODE_W + L.SIDE_PAD * 2;
-    cicdH = cicdItems.length * L.NODE_H + (cicdItems.length - 1) * L.NODE_GAP_Y + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
+  // If aws_codepipeline exists, it becomes the visual container for other CI/CD resources.
+  const cicdItemsAll = zones.cicd;
+  const cicdPipeline = cicdItemsAll.find(r => r.type === 'aws_codepipeline');
+  const cicdChildren = cicdPipeline
+    ? cicdItemsAll.filter(r => r.type !== 'aws_codepipeline')
+    : cicdItemsAll;
+  // Leaf items to lay out (children if pipeline exists, all if not)
+  const cicdLeafs = cicdChildren;
+
+  let cicdW = 0, cicdH = 0;
+  let cicdPipeW = 0, cicdPipeH = 0;  // inner CodePipeline box dimensions
+
+  if (cicdItemsAll.length) {
+    if (cicdPipeline && cicdChildren.length > 0) {
+      // Grid of children inside CodePipeline container
+      const { innerW: cInW, innerH: cInH } = _gridSize(cicdChildren);
+      cicdPipeW = cInW + L.ZONE_PAD_X * 2;
+      cicdPipeH = L.ZONE_HEADER + L.ZONE_PAD_Y + cInH + L.ZONE_PAD_Y;
+      cicdW = cicdPipeW + L.SIDE_PAD * 2;
+      cicdH = cicdPipeH + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
+    } else {
+      // Flat list (no pipeline or pipeline is the only item)
+      const leafCount = cicdLeafs.length || 1;
+      cicdW = L.NODE_W + L.SIDE_PAD * 2;
+      cicdH = leafCount * L.NODE_H + (leafCount - 1) * L.NODE_GAP_Y + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
+    }
   }
 
   // ── Step 5: absolute positions ────────────────────────────────────
@@ -280,16 +300,46 @@ function computeLayout(data, showDetails = false) {
   }
 
   // CI/CD nodes
-  if (cicdItems.length) {
-    const nodeX = cicdX + L.SIDE_PAD;
-    cicdItems.forEach((item, i) => {
-      item.x = nodeX;
-      item.y = cicdY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (L.NODE_H + L.NODE_GAP_Y);
-      item.width = L.NODE_W;
-      item.height = L.NODE_H;
-      allNodes.push(item);
-      nodeMap[item.id] = item;
-    });
+  if (cicdItemsAll.length) {
+    if (cicdPipeline && cicdChildren.length > 0) {
+      // Children go inside the CodePipeline container box
+      const { cols } = _gridSize(cicdChildren);
+      const pipeAbsX = cicdX + L.SIDE_PAD;
+      const pipeAbsY = cicdY + L.EXTERNAL_HEADER + L.SIDE_PAD;
+      const childStartX = pipeAbsX + L.ZONE_PAD_X;
+      const childStartY = pipeAbsY + L.ZONE_HEADER + L.ZONE_PAD_Y;
+
+      cicdChildren.forEach((item, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        item.x = childStartX + col * (L.NODE_W + L.NODE_GAP_X);
+        item.y = childStartY + row * (L.NODE_H + L.NODE_GAP_Y);
+        item.width = L.NODE_W;
+        item.height = L.NODE_H;
+        allNodes.push(item);
+        nodeMap[item.id] = item;
+      });
+
+      // CodePipeline itself: in nodeMap as the container box for edge routing
+      cicdPipeline.x = pipeAbsX;
+      cicdPipeline.y = pipeAbsY;
+      cicdPipeline.width = cicdPipeW;
+      cicdPipeline.height = cicdPipeH;
+      nodeMap[cicdPipeline.id] = cicdPipeline;
+      // Not added to allNodes — rendered as a container, not a leaf icon
+    } else {
+      // Flat list (pipeline only, or no pipeline)
+      const items = cicdLeafs.length ? cicdLeafs : cicdItemsAll;
+      const nodeX = cicdX + L.SIDE_PAD;
+      items.forEach((item, i) => {
+        item.x = nodeX;
+        item.y = cicdY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (L.NODE_H + L.NODE_GAP_Y);
+        item.width = L.NODE_W;
+        item.height = L.NODE_H;
+        allNodes.push(item);
+        nodeMap[item.id] = item;
+      });
+    }
   }
 
   // ── Step 7: build container list for rendering ─────────────────────
@@ -345,14 +395,29 @@ function computeLayout(data, showDetails = false) {
   }
 
   // CI/CD panel
-  if (cicdItems.length) {
+  if (cicdItemsAll.length) {
+    // Outer panel box
     containers.push({
       id: 'zone-cicd',
       zone: 'cicd',
       x: cicdX, y: cicdY,
       width: cicdW, height: cicdH,
-      label: 'CI/CD Pipeline',
+      label: 'CI/CD',
     });
+
+    // Inner CodePipeline container box (if pipeline wraps children)
+    if (cicdPipeline && cicdChildren.length > 0) {
+      containers.push({
+        id: 'container-pipeline',
+        zone: 'pipeline',
+        x: cicdX + L.SIDE_PAD,
+        y: cicdY + L.EXTERNAL_HEADER + L.SIDE_PAD,
+        width: cicdPipeW,
+        height: cicdPipeH,
+        label: `aws_codepipeline  "${cicdPipeline.name}"`,
+        isPipeline: true,
+      });
+    }
   }
 
   // ── Step 8: module groups ──────────────────────────────────────────
