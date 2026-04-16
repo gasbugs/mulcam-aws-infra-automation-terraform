@@ -108,6 +108,17 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
     }
   }
 
+  // Sort external zone by service family so related resources cluster together
+  const _extOrder = (r) => {
+    const t = r.type || '';
+    if (t.startsWith('aws_cloudfront') || t.startsWith('aws_waf')) return 0;
+    if (t.startsWith('aws_s3')) return 1;
+    if (t.startsWith('aws_route53')) return 2;
+    if (t.startsWith('aws_acm')) return 3;
+    return 4;
+  };
+  zones.external.sort((a, b) => _extOrder(a) - _extOrder(b));
+
   // ── Step 1: layout each vpc-internal zone ──────────────────────────
   const vpcInternalZones = ['public', 'private', 'database'];
   const zoneBoxes = {}; // zone → { items, innerW, innerH, cols, rows }
@@ -173,13 +184,9 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
   let extPanelH = 0;
   let extGridInfo = null;
   if (extItems.length) {
-    // Single column panel on the left (mirrors side panel style)
-    const cols = 1;
-    const rows = extItems.length;
-    const innerW = L.NODE_W;
-    const innerH = rows * L.NODE_H + (rows - 1) * L.NODE_GAP_Y;
-    extGridInfo = { cols, rows, innerW, innerH };
-    extPanelW = L.NODE_W + L.SIDE_PAD * 2;
+    const { cols, rows, innerW, innerH, rowH } = _gridSize(extItems);
+    extGridInfo = { cols, rows, innerW, innerH, rowH };
+    extPanelW = innerW + L.SIDE_PAD * 2;
     extPanelH = innerH + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
   }
 
@@ -251,12 +258,16 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
   const allNodes = [];
   const nodeMap = {};
 
-  // External nodes — left panel, single column
+  // External nodes — grid layout (auto columns, sorted by service family)
   if (extItems.length && extGridInfo) {
-    const nodeX = extX + L.SIDE_PAD;
+    const { cols, rowH: extRowH } = extGridInfo;
+    const nodeStartX = extX + L.SIDE_PAD;
+    const nodeStartY = extY + L.EXTERNAL_HEADER + L.SIDE_PAD;
     extItems.forEach((item, i) => {
-      item.x = nodeX;
-      item.y = extY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (_nodeHeight(item) + L.NODE_GAP_Y);
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      item.x = nodeStartX + col * (L.NODE_W + L.NODE_GAP_X);
+      item.y = nodeStartY + row * ((extRowH || L.NODE_H) + L.NODE_GAP_Y);
       item.width = L.NODE_W;
       item.height = _nodeHeight(item);
       allNodes.push(item);
@@ -461,9 +472,12 @@ function _classify(r) {
   if (r.category === 'cdn') return 'external';
   if (['aws_wafv2_web_acl', 'aws_wafv2_web_acl_association'].includes(t)) return 'external';
   if (t === 'aws_acm_certificate' || t === 'aws_acm_certificate_validation') return 'external';
-  // S3 that's likely a website (external), otherwise storage
-  if (t === 'aws_s3_bucket' && !r.from_module) return 'external';
-  if (r.category === 'storage') return 'database'; // EFS, EBS near DB
+  // S3 is always external (user-facing), regardless of module origin
+  if (t === 'aws_s3_bucket') return 'external';
+  // VPC-mounted storage (EFS, EBS, Backup) stays near the database zone
+  if (['aws_efs_file_system', 'aws_ebs_volume', 'aws_volume_attachment',
+       'aws_backup_plan', 'aws_backup_vault', 'aws_backup_selection'].includes(t)) return 'database';
+  if (r.category === 'storage') return 'external'; // other storage → external
   // Side: IAM, monitoring, encryption, CI/CD (support services — not traffic path)
   if (['iam', 'monitoring', 'security'].includes(r.category)) return 'side';
   if (r.category === 'cicd') return 'cicd';

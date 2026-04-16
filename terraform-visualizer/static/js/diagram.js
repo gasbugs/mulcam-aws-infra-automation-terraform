@@ -486,11 +486,12 @@ function fitToView(layout) {
   if (!layout) return;
   const svgEl = document.getElementById('diagram');
   const rect = svgEl.getBoundingClientRect();
-  const padFraction = 0.9;
+  const padFraction = 0.92;
 
   const scaleX = (rect.width * padFraction) / layout.width;
   const scaleY = (rect.height * padFraction) / layout.height;
-  const scale = Math.min(scaleX, scaleY, 1.5);
+  // Clamp: never smaller than 0.6 (too zoomed out) nor larger than 1.5
+  const scale = Math.max(0.6, Math.min(scaleX, scaleY, 1.5));
 
   const tx = (rect.width - layout.width * scale) / 2;
   const ty = (rect.height - layout.height * scale) / 2;
