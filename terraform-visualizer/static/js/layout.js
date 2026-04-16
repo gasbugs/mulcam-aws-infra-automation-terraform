@@ -116,8 +116,8 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
   for (const zName of vpcInternalZones) {
     const items = zones[zName];
     if (!items.length) continue;
-    const { cols, rows, innerW, innerH } = _gridSize(items);
-    zoneBoxes[zName] = { items, cols, rows, innerW, innerH };
+    const { cols, rows, innerW, innerH, rowH } = _gridSize(items);
+    zoneBoxes[zName] = { items, cols, rows, innerW, innerH, rowH };
     maxInnerW = Math.max(maxInnerW, innerW);
   }
 
@@ -256,9 +256,9 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
     const nodeX = extX + L.SIDE_PAD;
     extItems.forEach((item, i) => {
       item.x = nodeX;
-      item.y = extY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (L.NODE_H + L.NODE_GAP_Y);
+      item.y = extY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (_nodeHeight(item) + L.NODE_GAP_Y);
       item.width = L.NODE_W;
-      item.height = L.NODE_H;
+      item.height = _nodeHeight(item);
       allNodes.push(item);
       nodeMap[item.id] = item;
     });
@@ -266,16 +266,16 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
 
   // Boundary (IGW) — centered at VPC top
   if (boundaryItems.length) {
-    const { cols, innerW } = _gridSize(boundaryItems);
+    const { cols, innerW, rowH: bRowH } = _gridSize(boundaryItems);
     const bOffsetX = vpcX + L.VPC_PAD_X + (zoneW - innerW) / 2;
     const bOffsetY = vpcY + L.VPC_HEADER + L.VPC_PAD_Y / 2;
     boundaryItems.forEach((item, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
       item.x = bOffsetX + col * (L.NODE_W + L.NODE_GAP_X);
-      item.y = bOffsetY + row * (L.NODE_H + L.NODE_GAP_Y);
+      item.y = bOffsetY + row * ((bRowH || L.NODE_H) + L.NODE_GAP_Y);
       item.width = L.NODE_W;
-      item.height = L.NODE_H;
+      item.height = _nodeHeight(item);
       allNodes.push(item);
       nodeMap[item.id] = item;
     });
@@ -292,13 +292,14 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
       : 0);
     const nodeStartY = zAbsY + L.ZONE_HEADER + L.ZONE_PAD_Y;
 
+    const rowH = box.rowH || L.NODE_H;
     box.items.forEach((item, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
       item.x = nodeStartX + col * (L.NODE_W + L.NODE_GAP_X);
-      item.y = nodeStartY + row * (L.NODE_H + L.NODE_GAP_Y);
+      item.y = nodeStartY + row * (rowH + L.NODE_GAP_Y);
       item.width = L.NODE_W;
-      item.height = L.NODE_H;
+      item.height = _nodeHeight(item);
       allNodes.push(item);
       nodeMap[item.id] = item;
     });
@@ -307,11 +308,13 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
   // Side nodes
   if (sideItems.length) {
     const nodeX = sideX + L.SIDE_PAD;
-    sideItems.forEach((item, i) => {
+    let sideNodeY = sideY + L.EXTERNAL_HEADER + L.SIDE_PAD;
+    sideItems.forEach((item) => {
       item.x = nodeX;
-      item.y = sideY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (L.NODE_H + L.NODE_GAP_Y);
+      item.y = sideNodeY;
       item.width = L.NODE_W;
-      item.height = L.NODE_H;
+      item.height = _nodeHeight(item);
+      sideNodeY += item.height + L.NODE_GAP_Y;
       allNodes.push(item);
       nodeMap[item.id] = item;
     });
@@ -488,13 +491,24 @@ function _classifyStub(m) {
   return 'private';
 }
 
+/** Compute dynamic node height: extends base height to fit attached SG badges. */
+function _nodeHeight(r) {
+  const sgCount = (r.attached_sgs || []).length;
+  if (!sgCount) return L.NODE_H;
+  const SG_ROW_H = 22;  // height per SG badge row
+  const SG_TOP_PAD = 10; // separator + padding above first badge
+  return L.NODE_H + SG_TOP_PAD + sgCount * SG_ROW_H;
+}
+
 function _gridSize(items) {
   const n = items.length;
   const cols = Math.min(n, Math.max(1, Math.ceil(Math.sqrt(n * 1.8))));
   const rows = Math.ceil(n / cols);
+  // Use the tallest node height in the set as the uniform row height
+  const rowH = items.length ? Math.max(...items.map(r => _nodeHeight(r))) : L.NODE_H;
   const innerW = cols * L.NODE_W + (cols - 1) * L.NODE_GAP_X;
-  const innerH = rows * L.NODE_H + (rows - 1) * L.NODE_GAP_Y;
-  return { cols, rows, innerW, innerH };
+  const innerH = rows * rowH + (rows - 1) * L.NODE_GAP_Y;
+  return { cols, rows, innerW, innerH, rowH };
 }
 
 function _zoneLabel(zone) {

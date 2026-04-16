@@ -89,27 +89,31 @@ def api_project():
     # Resolve references first (needed for attached_sgs computation)
     edges = resolve_references(active_resources, parsed["data_sources"], registry_modules)
 
-    # Build attached_sgs: resource_id → list of SG names attached to it
+    # Build attached_sgs: resource_id → list of {id, name, file} for SGs attached to it
     # Security group is rendered as a badge on the resource, not as a standalone node
-    sg_id_to_name = {
-        res["id"]: res["name"]
+    sg_info_map = {
+        res["id"]: {
+            "id": res["id"],
+            "name": res["name"],
+            "file": res.get("file", ""),
+        }
         for res in active_resources
         if res["type"] == "aws_security_group"
     }
     attached_sgs_map = {}
     for edge in edges:
         # Resource → SG edge: the resource has this SG attached
-        if edge["to"] in sg_id_to_name:
+        if edge["to"] in sg_info_map:
             lst = attached_sgs_map.setdefault(edge["from"], [])
-            sg_name = sg_id_to_name[edge["to"]]
-            if sg_name not in lst:
-                lst.append(sg_name)
-        # SG → Resource edge (e.g., SG references another SG): attach on target too
-        if edge["from"] in sg_id_to_name:
+            info = sg_info_map[edge["to"]]
+            if not any(x["id"] == info["id"] for x in lst):
+                lst.append(info)
+        # SG → Resource edge (e.g., SG references another SG)
+        if edge["from"] in sg_info_map:
             lst = attached_sgs_map.setdefault(edge["to"], [])
-            sg_name = sg_id_to_name[edge["from"]]
-            if sg_name not in lst:
-                lst.append(sg_name)
+            info = sg_info_map[edge["from"]]
+            if not any(x["id"] == info["id"] for x in lst):
+                lst.append(info)
 
     # Annotate resources with visual metadata
     annotated = []

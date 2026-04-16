@@ -373,47 +373,56 @@ function renderDiagram(data, showDetails = false) {
         .text('N');
     }
 
-    // Security Group badges — shown as shield icons below the node
+    // Security Group badges — rendered inside the node card (extended area)
     if (node.attached_sgs && node.attached_sgs.length > 0) {
-      const sgBadgeW = 80;
-      const sgBadgeH = 16;
-      const sgStartX = (node.width - Math.min(node.attached_sgs.length, 2) * (sgBadgeW + 4)) / 2;
+      const SG_ROW_H = 22;
+      const PAD_X = 8;
+      // SG section starts right after the base node content (at NODE_H offset)
+      const sgSectionY = node.height - node.attached_sgs.length * SG_ROW_H;
 
-      node.attached_sgs.slice(0, 2).forEach((sgName, i) => {
-        const bx = sgStartX + i * (sgBadgeW + 4);
-        const by = node.height + 4 + Math.floor(i / 2) * (sgBadgeH + 3);
+      // Separator line between resource content and SG badges
+      g.append('line')
+        .attr('x1', PAD_X).attr('y1', sgSectionY - 2)
+        .attr('x2', node.width - PAD_X).attr('y2', sgSectionY - 2)
+        .attr('stroke', '#DD344C44').attr('stroke-width', 1);
+
+      // Small "SG" section label
+      g.append('text')
+        .attr('x', PAD_X + 2).attr('y', sgSectionY + 8)
+        .attr('font-size', 7).attr('fill', '#DD344C99').attr('font-weight', '700')
+        .text('Security Groups');
+
+      node.attached_sgs.forEach((sg, i) => {
+        const by = sgSectionY + 12 + i * SG_ROW_H;
+        const bw = node.width - PAD_X * 2;
         const sgG = g.append('g')
           .attr('class', 'sg-badge')
-          .attr('transform', `translate(${bx}, ${by})`);
+          .attr('transform', `translate(${PAD_X}, ${by})`)
+          .style('cursor', 'pointer')
+          .on('click', (event) => {
+            event.stopPropagation();
+            fetchAndShowCode({ id: sg.id, file: sg.file, type: 'aws_security_group', name: sg.name });
+          });
 
         sgG.append('rect')
-          .attr('width', sgBadgeW).attr('height', sgBadgeH).attr('rx', 3)
-          .attr('fill', '#DD344C22').attr('stroke', '#DD344C').attr('stroke-width', 0.8);
+          .attr('width', bw).attr('height', SG_ROW_H - 4).attr('rx', 3)
+          .attr('fill', '#DD344C18').attr('stroke', '#DD344C66').attr('stroke-width', 1);
 
-        // Shield icon (tiny)
+        // Shield icon
         sgG.append('text')
-          .attr('x', 5).attr('y', 11.5)
-          .attr('font-size', 9).attr('fill', '#DD344C')
+          .attr('x', 5).attr('y', 12)
+          .attr('font-size', 11).attr('fill', '#DD344C')
           .text('🛡');
 
-        // SG name (truncated)
-        const truncName = sgName.length > 10 ? sgName.slice(0, 9) + '…' : sgName;
+        // SG name (truncated to fit)
+        const maxCh = Math.floor((bw - 22) / 7);
+        const truncName = sg.name.length > maxCh ? sg.name.slice(0, maxCh - 1) + '…' : sg.name;
         sgG.append('text')
           .attr('class', 'sg-badge-label')
-          .attr('x', 16).attr('y', 11.5)
-          .attr('font-size', 9).attr('fill', '#DD344C').attr('font-weight', '600')
+          .attr('x', 20).attr('y', 12.5)
+          .attr('font-size', 10).attr('fill', '#C41B2E').attr('font-weight', '600')
           .text(truncName);
       });
-
-      // If more than 2 SGs, show "+N more"
-      if (node.attached_sgs.length > 2) {
-        const extraG = g.append('g')
-          .attr('class', 'sg-badge')
-          .attr('transform', `translate(${sgStartX}, ${node.height + 4 + sgBadgeH + 3})`);
-        extraG.append('text')
-          .attr('font-size', 8).attr('fill', '#DD344C').attr('y', 10)
-          .text(`+${node.attached_sgs.length - 2} more`);
-      }
     }
 
     // Expand badge (+N): show for nodes with hidden neighbors (only when !showDetails)
