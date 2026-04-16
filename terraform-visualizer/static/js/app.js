@@ -163,6 +163,7 @@ async function selectProject(proj, element) {
 
     // Update legend
     updateLegend(data.stats.categories);
+    document.getElementById('edge-legend')?.classList.add('visible');
 
     // Show warnings if any
     if (data.warnings?.length) {

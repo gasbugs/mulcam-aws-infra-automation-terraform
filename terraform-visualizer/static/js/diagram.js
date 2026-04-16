@@ -35,10 +35,14 @@ function initDiagram() {
 
   // Defs for arrowheads
   const defs = svg.append('defs');
-  ['network', 'iam', 'loadbalancer', 'reference', 'data'].forEach(type => {
+  ['traffic', 'permission', 'network', 'loadbalancer', 'reference', 'data'].forEach(type => {
     const colors = {
-      network: '#147EB3', iam: '#DD344C', loadbalancer: '#8C4FFF',
-      reference: '#9ca3af', data: '#6b7280'
+      traffic: '#EF4444',       // 빨강 — 트래픽 경로
+      permission: '#22C55E',    // 초록 — 권한 연결
+      network: '#147EB3',       // 파랑 — 네트워크 구성
+      loadbalancer: '#8C4FFF',  // 보라 — 로드밸런서
+      reference: '#9ca3af',     // 회색 — 일반 참조
+      data: '#6b7280'           // 어두운 회색 — 데이터 소스
     };
     defs.append('marker')
       .attr('id', `arrow-${type}`)
@@ -257,6 +261,17 @@ function renderDiagram(data, showDetails = false) {
     .attr('marker-end', d => `url(#arrow-${d.type})`)
     .attr('data-from', d => d.from)
     .attr('data-to', d => d.to);
+
+  // Edge labels (for labeled edges like VPC Endpoint → service)
+  edgeG.selectAll('.edge-label')
+    .data(edgePaths.filter(e => e.label))
+    .join('text')
+    .attr('class', d => `edge-label type-${d.type}`)
+    .attr('x', d => (d.x1 + d.x2) / 2)
+    .attr('y', d => (d.y1 + d.y2) / 2 - 7)
+    .attr('text-anchor', 'middle')
+    .attr('pointer-events', 'none')
+    .text(d => d.label);
 
   // Draw resource nodes
   const nodeG = rootG.append('g').attr('class', 'nodes');
@@ -630,10 +645,13 @@ function exportSVG() {
     .node-name { font-size: 11px; fill: #1f2937; font-weight: 600; text-anchor: middle; font-family: sans-serif; }
     .container-label { font-size: 13px; font-weight: 600; fill: #374151; font-family: sans-serif; }
     .edge-line { fill: none; stroke-width: 1.5; opacity: 0.5; }
+    .edge-line.type-traffic { stroke: #EF4444; }
+    .edge-line.type-permission { stroke: #22C55E; }
     .edge-line.type-network { stroke: #147EB3; }
-    .edge-line.type-iam { stroke: #DD344C; }
     .edge-line.type-loadbalancer { stroke: #8C4FFF; }
     .edge-line.type-reference { stroke: #9ca3af; }
+    .edge-label { font-size: 10px; font-weight: 600; font-family: monospace; }
+    .edge-label.type-traffic { fill: #EF4444; }
     .module-node .node-bg { stroke: #7B42BC; stroke-width: 1.5; fill: #f5f0ff; }
   `;
   clone.insertBefore(style, clone.firstChild);
