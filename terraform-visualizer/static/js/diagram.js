@@ -10,6 +10,14 @@ function initDiagram() {
   svg = d3.select('#diagram');
   rootG = svg.append('g').attr('class', 'root');
 
+  // Code panel close button
+  document.getElementById('code-panel-close')?.addEventListener('click', () => {
+    selectedNode = null;
+    d3.selectAll('.resource-node').classed('highlighted', false).classed('dimmed', false);
+    d3.selectAll('.edge-line').classed('highlighted', false).classed('dimmed', false);
+    hideCodePanel();
+  });
+
   // Defs for arrowheads
   const defs = svg.append('defs');
   ['network', 'iam', 'loadbalancer', 'reference', 'data'].forEach(type => {
@@ -251,10 +259,11 @@ function fitToView(layout) {
 
 function toggleHighlight(node) {
   if (selectedNode === node.id) {
-    // Deselect
+    // Deselect — close panel
     selectedNode = null;
     d3.selectAll('.resource-node').classed('highlighted', false).classed('dimmed', false);
     d3.selectAll('.edge-line').classed('highlighted', false).classed('dimmed', false);
+    hideCodePanel();
     return;
   }
 
@@ -284,6 +293,122 @@ function toggleHighlight(node) {
       .classed('highlighted', isConnected)
       .classed('dimmed', !isConnected);
   });
+
+  // Show source code in bottom panel
+  fetchAndShowCode(node);
+}
+
+
+async function fetchAndShowCode(node) {
+  if (!currentData?.path) return;
+
+  const panel = document.getElementById('code-panel');
+  const titleEl = document.getElementById('code-panel-title');
+  const fileEl = document.getElementById('code-panel-file');
+  const contentEl = document.getElementById('code-panel-content');
+
+  titleEl.textContent = node.id;
+  fileEl.textContent = node.file ? `📄 ${node.file}` : '';
+  contentEl.innerHTML = '<span class="hcl-comment">Loading…</span>';
+  panel.classList.remove('hidden');
+
+  try {
+    const res = await fetch(
+      `/api/source?path=${encodeURIComponent(currentData.path)}&id=${encodeURIComponent(node.id)}`
+    );
+    const data = await res.json();
+
+    if (data.error) {
+      contentEl.innerHTML = `<span class="hcl-comment"># ${_escHtml(data.error)}</span>`;
+    } else {
+      fileEl.textContent = data.file ? `📄 ${data.file}` : '';
+      contentEl.innerHTML = _highlightHCL(data.source || '');
+    }
+  } catch (err) {
+    contentEl.innerHTML = `<span class="hcl-comment"># Failed to load source</span>`;
+  }
+}
+
+
+function hideCodePanel() {
+  document.getElementById('code-panel')?.classList.add('hidden');
+}
+
+
+function _escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+
+function _highlightHCL(code) {
+  // Escape HTML first, then apply token-based highlighting
+  const lines = code.split('\n');
+  return lines.map(line => {
+    // Comments
+    if (/^\s*#/.test(line)) return `<span class="hcl-comment">${_escHtml(line)}</span>`;
+
+    // Process token by token using a simple state machine
+    let out = '';
+    let i = 0;
+    const raw = line;
+
+    while (i < raw.length) {
+      // String literal
+      if (raw[i] === '"') {
+        let j = i + 1;
+        while (j < raw.length && raw[j] !== '"') {
+          if (raw[j] === '\\') j++;
+          j++;
+        }
+        out += `<span class="hcl-string">${_escHtml(raw.slice(i, j + 1))}</span>`;
+        i = j + 1;
+        continue;
+      }
+
+      // Inline comment
+      if (raw[i] === '#') {
+        out += `<span class="hcl-comment">${_escHtml(raw.slice(i))}</span>`;
+        break;
+      }
+
+      // Keyword (resource|data|module|variable|output|locals|terraform|provider)
+      const kwMatch = raw.slice(i).match(/^(resource|data|module|variable|output|locals|terraform|provider)\b/);
+      if (kwMatch) {
+        out += `<span class="hcl-keyword">${kwMatch[1]}</span>`;
+        i += kwMatch[1].length;
+        continue;
+      }
+
+      // Attribute key (word followed by optional spaces then = or {)
+      const attrMatch = raw.slice(i).match(/^([a-z_][a-z0-9_]*)(\s*=|\s*\{)/);
+      if (attrMatch && !/^\s/.test(raw.slice(0, i))) {
+        out += `<span class="hcl-attr">${_escHtml(attrMatch[1])}</span>`;
+        i += attrMatch[1].length;
+        continue;
+      }
+
+      // AWS resource references (aws_type.name)
+      const refMatch = raw.slice(i).match(/^(aws_[a-z_]+\.[a-z_][a-z0-9_.]*)/);
+      if (refMatch) {
+        out += `<span class="hcl-ref">${_escHtml(refMatch[1])}</span>`;
+        i += refMatch[1].length;
+        continue;
+      }
+
+      // Number
+      const numMatch = raw.slice(i).match(/^(\d+)/);
+      if (numMatch && (i === 0 || !/\w/.test(raw[i - 1]))) {
+        out += `<span class="hcl-number">${numMatch[1]}</span>`;
+        i += numMatch[1].length;
+        continue;
+      }
+
+      // Default: emit single char
+      out += _escHtml(raw[i]);
+      i++;
+    }
+    return out;
+  }).join('\n');
 }
 
 
@@ -353,14 +478,16 @@ function exportSVG() {
 
 function _shortType(type) {
   if (!type) return '';
-  return type.replace(/^aws_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const s = type.replace(/^aws_/, '').replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+  return s.length > 14 ? s.substring(0, 13) + '…' : s;
 }
 
 
 function _shortName(name) {
   if (!name) return '';
-  if (name.length > 16) {
-    return name.substring(0, 14) + '...';
-  }
-  return name;
+  // For dot-separated names (module paths), show only the last segment
+  const parts = name.split('.');
+  const short = parts[parts.length - 1];
+  return short.length > 13 ? short.substring(0, 12) + '…' : short;
 }

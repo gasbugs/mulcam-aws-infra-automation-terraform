@@ -73,6 +73,8 @@ def api_project():
     # Annotate resources with visual metadata
     annotated = []
     for res in active_resources:
+        file_dir = res.get("file_dir", project_dir)
+        file_name = res.get("file", "")
         annotated.append({
             "id": res["id"],
             "type": res["type"],
@@ -83,7 +85,8 @@ def api_project():
             "color": get_color(res["type"]),
             "count": res.get("count"),
             "for_each": bool(res.get("for_each")),
-            "file": res.get("file", ""),
+            "file": file_name,
+            "file_path": os.path.join(file_dir, file_name) if file_name else "",
             "from_module": res.get("from_module"),
             "module_source": res.get("module_source", ""),
             "hidden": is_hidden(res["type"]),
@@ -139,6 +142,74 @@ def api_project():
 
     _cache[cache_key] = {"mtime": mtime, "data": result}
     return jsonify(result)
+
+
+@app.route('/api/source')
+def api_source():
+    project_path = request.args.get('path', '')
+    resource_id = request.args.get('id', '')
+
+    if not project_path or not resource_id:
+        return jsonify({"error": "path and id required"}), 400
+
+    cache_key = project_path
+    if cache_key not in _cache:
+        return jsonify({"error": "project not loaded — view it first"}), 404
+
+    cached_resources = _cache[cache_key]["data"].get("resources", [])
+    resource = next((r for r in cached_resources if r["id"] == resource_id), None)
+
+    if not resource:
+        return jsonify({"error": "resource not found"}), 404
+
+    file_path = resource.get("file_path", "")
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({"error": "source file not found", "file": file_path}), 404
+
+    with open(file_path, 'r') as f:
+        content = f.read()
+
+    # Parse resource id to get type and name for block extraction
+    parts = resource_id.split('.')
+    if resource_id.startswith('data.') and len(parts) >= 3:
+        res_type, res_name = parts[1], parts[2]
+        block = _extract_hcl_block(content, 'data', res_type, res_name)
+    else:
+        # Last two segments are always type.name
+        res_type, res_name = parts[-2], parts[-1]
+        block = _extract_hcl_block(content, 'resource', res_type, res_name)
+
+    return jsonify({
+        "id": resource_id,
+        "file": os.path.relpath(file_path, REPO_ROOT),
+        "source": block or f"# Could not extract block from {os.path.basename(file_path)}",
+    })
+
+
+def _extract_hcl_block(content, block_type, res_type, res_name):
+    """Extract a specific resource or data block from HCL file content."""
+    import re
+    if block_type == 'data':
+        pattern = rf'data\s+"?{re.escape(res_type)}"?\s+"?{re.escape(res_name)}"?\s*\{{'
+    else:
+        pattern = rf'resource\s+"?{re.escape(res_type)}"?\s+"?{re.escape(res_name)}"?\s*\{{'
+
+    match = re.search(pattern, content)
+    if not match:
+        return None
+
+    start = match.start()
+    brace_count = 0
+    i = match.end() - 1  # position of the opening brace
+    while i < len(content):
+        if content[i] == '{':
+            brace_count += 1
+        elif content[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                return content[start:i + 1]
+        i += 1
+    return content[start:]  # unterminated block fallback
 
 
 def _filter_active(resources, variables):

@@ -515,6 +515,103 @@ body {
   fill: #9ca3af !important;
 }
 
+/* ===== Code Panel ===== */
+.code-panel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 300px;
+  background: #1e1e2e;
+  border-top: 2px solid #ff9900;
+  transform: translateY(100%);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+}
+
+.code-panel:not(.hidden) {
+  transform: translateY(0);
+}
+
+.code-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #13131f;
+  border-bottom: 1px solid #2a2a3e;
+  flex-shrink: 0;
+}
+
+.code-panel-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.code-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ff9900;
+  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.code-panel-file {
+  font-size: 11px;
+  color: #6b7280;
+  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
+  white-space: nowrap;
+}
+
+.code-panel-close {
+  background: none;
+  border: 1px solid #2a2a3e;
+  color: #9ca3af;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  line-height: 1.4;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.code-panel-close:hover {
+  background: #2a2a3e;
+  color: #fff;
+}
+
+.code-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 20px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #cdd6f4;
+  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace;
+  tab-size: 2;
+  white-space: pre;
+  word-break: normal;
+}
+
+.code-panel-content::-webkit-scrollbar { width: 6px; }
+.code-panel-content::-webkit-scrollbar-thumb { background: #3a3a50; border-radius: 3px; }
+
+/* HCL syntax highlighting */
+.hcl-keyword { color: #cba6f7; }
+.hcl-string  { color: #a6e3a1; }
+.hcl-number  { color: #fab387; }
+.hcl-comment { color: #585b70; font-style: italic; }
+.hcl-ref     { color: #89b4fa; }
+.hcl-attr    { color: #89dceb; }
+
 /* Loading spinner */
 .loading {
   position: absolute;

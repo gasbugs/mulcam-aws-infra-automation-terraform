@@ -74,6 +74,7 @@ def _resolve_local_module(mod, mod_name, source, project_dir,
         res["id"] = f"module.{mod_name}.{res['id']}"
         res["name"] = f"{mod_name}.{res['name']}"
         res["from_module"] = mod_name
+        res["file_dir"] = mod_path
         resolved_resources.append(res)
     # Recurse for nested modules
     if parsed["modules"]:
@@ -112,6 +113,7 @@ def _resolve_downloaded_module(mod, mod_name, source, mod_dir, parent_variables,
         res["name"] = f"{mod_name}.{res['name']}"
         res["from_module"] = mod_name
         res["module_source"] = source
+        res["file_dir"] = mod_dir
         resolved_resources.append(res)
 
     # Handle nested sub-modules (e.g. eks -> eks-managed-node-group)
@@ -128,6 +130,7 @@ def _resolve_downloaded_module(mod, mod_name, source, mod_dir, parent_variables,
                         res["id"] = f"module.{mod_name}.module.{sub_name}.{res['id']}"
                         res["name"] = f"{mod_name}.{sub_name}.{res['name']}"
                         res["from_module"] = f"{mod_name}.{sub_name}"
+                        res["file_dir"] = sub_path
                         resolved_resources.append(res)
             else:
                 sub_dir = sub_module_dir_map.get(sub_name)
@@ -140,6 +143,7 @@ def _resolve_downloaded_module(mod, mod_name, source, mod_dir, parent_variables,
                         res["name"] = f"{mod_name}.{sub_name}.{res['name']}"
                         res["from_module"] = f"{mod_name}.{sub_name}"
                         res["module_source"] = sub_source
+                        res["file_dir"] = sub_dir
                         resolved_resources.append(res)
 
 
