@@ -625,6 +625,18 @@ body {
 .hcl-ref     { color: #89b4fa; }
 .hcl-attr    { color: #89dceb; }
 
+/* Clickable resource references in code panel */
+.hcl-ref-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(137, 180, 250, 0.5);
+}
+.hcl-ref-link:hover {
+  color: #cdd6f4;
+  text-decoration-color: #89b4fa;
+}
+
 /* Loading spinner */
 .loading {
   position: absolute;

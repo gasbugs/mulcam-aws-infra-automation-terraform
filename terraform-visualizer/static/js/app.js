@@ -126,6 +126,7 @@ async function selectProject(proj, element) {
     document.getElementById('btn-details').classList.remove('active');
     document.getElementById('btn-details-label').textContent = '상세 보기';
     hideCodePanel();
+    resetExpandState();
     renderDiagram(data, showDetails);
 
     // Update legend

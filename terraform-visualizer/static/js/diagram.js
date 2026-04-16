@@ -5,6 +5,9 @@
 let currentData = null;
 let svg, rootG, zoom;
 let selectedNode = null;
+let expandedNodeIds = new Set();  // nodes with individually expanded hidden resources
+let currentNodeMap = {};          // visible nodeId -> node (for code panel links)
+let _needsFit = true;             // whether next render should auto-fit
 
 function initDiagram() {
   svg = d3.select('#diagram');
@@ -16,6 +19,15 @@ function initDiagram() {
     d3.selectAll('.resource-node').classed('highlighted', false).classed('dimmed', false);
     d3.selectAll('.edge-line').classed('highlighted', false).classed('dimmed', false);
     hideCodePanel();
+  });
+
+  // Code panel: click on AWS resource reference → highlight that node
+  document.getElementById('code-panel-content')?.addEventListener('click', (e) => {
+    const ref = e.target.closest('[data-ref]');
+    if (!ref) return;
+    const resourceId = ref.dataset.ref;
+    const node = currentNodeMap[resourceId];
+    if (node) toggleHighlight(node);
   });
 
   // Defs for arrowheads
@@ -49,10 +61,32 @@ function initDiagram() {
 }
 
 
+/** Called when switching projects — reset per-diagram state. */
+function resetExpandState() {
+  expandedNodeIds = new Set();
+  currentNodeMap = {};
+  _needsFit = true;
+}
+
 function renderDiagram(data, showDetails = false) {
   currentData = data;
   selectedNode = null;
   rootG.selectAll('*').remove();
+
+  // Pre-compute hidden neighbor sets for +N badges (before layout)
+  const hiddenSet = new Set((data.resources || []).filter(r => r.hidden).map(r => r.id));
+  const visibleSet = new Set((data.resources || []).filter(r => !r.hidden && !r.structural).map(r => r.id));
+  const hiddenNeighborSets = {};
+  for (const edge of (data.edges || [])) {
+    if (visibleSet.has(edge.from) && hiddenSet.has(edge.to)) {
+      if (!hiddenNeighborSets[edge.from]) hiddenNeighborSets[edge.from] = new Set();
+      hiddenNeighborSets[edge.from].add(edge.to);
+    }
+    if (hiddenSet.has(edge.from) && visibleSet.has(edge.to)) {
+      if (!hiddenNeighborSets[edge.to]) hiddenNeighborSets[edge.to] = new Set();
+      hiddenNeighborSets[edge.to].add(edge.from);
+    }
+  }
 
   if (!data.resources.length && !data.registry_modules.length) {
     rootG.append('text')
@@ -63,14 +97,15 @@ function renderDiagram(data, showDetails = false) {
     return;
   }
 
-  // Compute layout
-  const layout = computeLayout(data, showDetails);
+  // Compute layout (pass expandedNodeIds to reveal per-node hidden resources)
+  const layout = computeLayout(data, showDetails, expandedNodeIds);
 
   // nodeMap is built inside layout now, use it directly
   const nodeMap = layout.nodeMap || {};
   if (!Object.keys(nodeMap).length) {
     layout.nodes.forEach(n => { nodeMap[n.id] = n; });
   }
+  currentNodeMap = nodeMap;
 
   // Draw containers (back to front: VPC first, then zone boxes)
   const containerG = rootG.append('g').attr('class', 'containers');
@@ -232,10 +267,42 @@ function renderDiagram(data, showDetails = false) {
         .attr('font-size', 8)
         .text('N');
     }
+
+    // Expand badge (+N): show for nodes with hidden neighbors (only when !showDetails)
+    const hiddenNbrs = hiddenNeighborSets[node.id];
+    if (!showDetails && hiddenNbrs && hiddenNbrs.size > 0 && !isDetail) {
+      const isExpanded = expandedNodeIds.has(node.id);
+      const badge = g.append('g')
+        .attr('class', 'expand-badge')
+        .attr('transform', `translate(4, ${node.height - 20})`)
+        .style('cursor', 'pointer')
+        .on('click', (event) => {
+          event.stopPropagation();
+          if (expandedNodeIds.has(node.id)) expandedNodeIds.delete(node.id);
+          else expandedNodeIds.add(node.id);
+          renderDiagram(currentData, showDetails);
+        });
+
+      badge.append('circle')
+        .attr('cx', 8).attr('cy', 8).attr('r', 8)
+        .attr('fill', isExpanded ? '#3B48CC' : '#9ca3af')
+        .attr('stroke', '#fff').attr('stroke-width', 1.5);
+
+      badge.append('text')
+        .attr('x', 8).attr('y', 12.5)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', isExpanded ? 11 : 8)
+        .attr('font-weight', '700')
+        .attr('fill', '#fff')
+        .text(isExpanded ? '−' : `+${hiddenNbrs.size}`);
+    }
   });
 
-  // Fit to view
-  fitToView(layout);
+  // Fit to view (only on first render or project change)
+  if (_needsFit) {
+    fitToView(layout);
+    _needsFit = false;
+  }
 }
 
 
@@ -325,6 +392,10 @@ async function fetchAndShowCode(node) {
     } else {
       fileEl.textContent = data.file ? `📄 ${data.file}` : '';
       contentEl.innerHTML = _highlightHCL(data.source || '');
+      // Mark refs that exist in the current diagram as clickable links
+      contentEl.querySelectorAll('[data-ref]').forEach(el => {
+        if (currentNodeMap[el.dataset.ref]) el.classList.add('hcl-ref-link');
+      });
     }
   } catch (err) {
     contentEl.innerHTML = `<span class="hcl-comment"># Failed to load source</span>`;
@@ -389,11 +460,13 @@ function _highlightHCL(code) {
         continue;
       }
 
-      // AWS resource references (aws_type.name)
-      const refMatch = raw.slice(i).match(/^(aws_[a-z_]+\.[a-z_][a-z0-9_.]*)/);
+      // AWS resource references (aws_type.name[.attr])
+      const refMatch = raw.slice(i).match(/^(aws_[a-z_]+)\.([a-z_][a-z0-9_]*)(\.[a-z0-9_.]*)?/);
       if (refMatch) {
-        out += `<span class="hcl-ref">${_escHtml(refMatch[1])}</span>`;
-        i += refMatch[1].length;
+        const resourceId = `${refMatch[1]}.${refMatch[2]}`;
+        const fullRef = refMatch[0];
+        out += `<span class="hcl-ref" data-ref="${_escHtml(resourceId)}" title="→ ${_escHtml(resourceId)}">${_escHtml(fullRef)}</span>`;
+        i += fullRef.length;
         continue;
       }
 

@@ -50,15 +50,26 @@ const VPC_BOUNDARY = new Set(['aws_internet_gateway', 'aws_nat_gateway']);
  * @param {object} data - API response
  * @param {boolean} showDetails - if true, include hidden/plumbing nodes
  */
-function computeLayout(data, showDetails = false) {
+function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
   const allResources = data.resources || [];
   const stubs = data.registry_modules || [];
   const dataSources = data.data_sources || [];
 
+  // Compute which hidden resources are individually revealed via expandedNodeIds
+  const revealedHiddenIds = new Set();
+  if (expandedNodeIds.size > 0) {
+    const hiddenSet = new Set(allResources.filter(r => r.hidden).map(r => r.id));
+    for (const edge of (data.edges || [])) {
+      if (expandedNodeIds.has(edge.from) && hiddenSet.has(edge.to)) revealedHiddenIds.add(edge.to);
+      if (expandedNodeIds.has(edge.to) && hiddenSet.has(edge.from)) revealedHiddenIds.add(edge.from);
+    }
+  }
+
   // Primary leaf nodes: non-hidden, non-structural
-  // When showDetails=true, also include hidden nodes (marked isDetail=true)
-  const leafNodes = allResources.filter(r => !r.structural && (!r.hidden || showDetails))
-    .map(r => r.hidden ? { ...r, isDetail: true } : r);
+  // Include hidden nodes if: global showDetails, OR individually revealed, OR in detail view
+  const leafNodes = allResources.filter(r =>
+    !r.structural && (!r.hidden || showDetails || revealedHiddenIds.has(r.id))
+  ).map(r => r.hidden ? { ...r, isDetail: true } : r);
   const hasVPC = allResources.some(r =>
     r.type === 'aws_vpc' ||
     (r.category === 'networking' && !r.hidden)
