@@ -1,59 +1,77 @@
-# HashiCorp에서 제공하는 예시 코드, MPL-2.0 라이선스에 따라 배포됨
-# 이 코드는 EKS 클러스터를 프로비저닝하기 위한 기본 설정을 포함
-# 원본은 HashiCorp GitHub에서 확인 가능: https://github.com/hashicorp/learn-terraform-provision-eks-cluster/blob/main/main.tf
+# ================================================================
+# VPC(Virtual Private Cloud) 네트워크 구성
+#
+# VPC란?
+#   AWS 안에 만드는 나만의 가상 네트워크 공간
+#   인터넷과 격리된 프라이빗 네트워크를 구성하고,
+#   필요한 부분만 외부에 노출할 수 있음
+# ================================================================
 
-# AWS의 사용 가능한 가용 영역 중에서 관리형 노드 그룹에 지원되지 않는 Local Zone을 필터링
-# 'opt-in-not-required' 상태인 가용 영역만 선택하여 사용
+# 현재 리전에서 사용 가능한 가용 영역(AZ) 목록 조회
+# AZ(Availability Zone): 같은 리전 안의 독립된 데이터센터 그룹
+# opt-in-not-required: 별도 신청 없이 기본으로 사용 가능한 AZ만 선택
+# (일부 AZ는 Local Zone이라 EKS 노드 그룹 미지원 → 필터로 제외)
 data "aws_availability_zones" "available" {
   filter {
-    name   = "opt-in-status"         # 필터링할 항목의 이름
-    values = ["opt-in-not-required"] # 필터 조건
+    name   = "opt-in-status"
+    values = ["opt-in-not-required"]
   }
 }
 
-# 로컬 변수 선언. 클러스터 이름에 무작위 문자열을 추가하여 고유성을 보장
+# EKS 클러스터 이름 — 랜덤 suffix로 동일 계정 내 여러 클러스터 구분
 locals {
   cluster_name = "education-eks-${random_string.suffix.result}"
 }
 
-# 8자리 길이의 무작위 문자열을 생성하는 리소스. 특수 문자는 포함하지 않음
+# 클러스터 이름에 붙일 랜덤 8자리 영숫자 문자열
 resource "random_string" "suffix" {
   length  = 8
   special = false
 }
 
-# VPC 생성 모듈을 정의. Terraform의 VPC 모듈을 사용해 VPC를 프로비저닝
+# VPC 생성 — terraform-aws-modules/vpc 공개 모듈 사용
+# 서브넷·라우팅 테이블·인터넷 게이트웨이·NAT 게이트웨이를 자동으로 생성해 줌
 module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws" # VPC 모듈의 소스 경로
-  version = "6.5.0"                         # VPC 모듈의 버전
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "6.5.0"
 
-  name = "education-vpc" # VPC의 이름
+  name = "education-vpc"
 
-  # VPC의 CIDR 블록을 10.0.0.0/16으로 설정
+  # CIDR 블록: 이 VPC 안에서 사용할 IP 주소 범위
+  # 10.0.0.0/16 → 10.0.0.0 ~ 10.0.255.255 (약 65,000개 IP)
   cidr = "10.0.0.0/16"
-  # 필터링된 가용 영역 중 상위 3개를 선택
+
+  # 3개의 AZ에 걸쳐 서브넷 배치 → 한 AZ 장애 시 나머지 AZ로 서비스 유지 가능
   azs = slice(data.aws_availability_zones.available.names, 0, 3)
 
-  # 사설 서브넷의 CIDR 블록 정의
+  # 프라이빗 서브넷: 인터넷에서 직접 접근 불가 — EKS 노드, CodeBuild 실행 위치
+  # 외부와 통신은 NAT 게이트웨이를 통해 단방향(아웃바운드)으로만 가능
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
-  # 공용 서브넷의 CIDR 블록 정의
+
+  # 퍼블릭 서브넷: 인터넷과 직접 통신 가능 — 로드밸런서(ELB), NAT 게이트웨이 위치
   public_subnets = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
 
-  # NAT 게이트웨이를 활성화하고, 단일 NAT 게이트웨이를 사용
-  enable_nat_gateway   = true
-  single_nat_gateway   = true
-  enable_dns_hostnames = true # DNS 호스트 이름을 활성화
+  # NAT 게이트웨이: 프라이빗 서브넷 → 인터넷 아웃바운드 트래픽 허용
+  # (ECR 이미지 pull, apt install 등에 필요)
+  enable_nat_gateway = true
 
-  # 공용 서브넷의 태그. ELB 역할을 부여
+  # single_nat_gateway: NAT 게이트웨이를 1개만 생성 (비용 절감)
+  # 운영 환경에서는 AZ별로 1개씩 생성 권장 (고가용성)
+  single_nat_gateway = true
+
+  # DNS 호스트 이름 활성화 — EC2 인스턴스에 DNS 이름 자동 부여
+  enable_dns_hostnames = true
+
+  # EKS가 자동으로 생성하는 로드밸런서(ALB/NLB/CLB)가 올바른 서브넷에 배치되도록 태그 지정
+  # 퍼블릭 서브넷 태그: 인터넷에서 접근 가능한 외부용 로드밸런서 위치
   public_subnet_tags = {
     "kubernetes.io/role/elb" = 1
   }
 
-  # 사설 서브넷의 태그. 내부 ELB 역할을 부여
+  # 프라이빗 서브넷 태그: VPC 내부에서만 접근 가능한 내부용 로드밸런서 위치
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = 1
   }
 
   tags = local.tags
-
 }
