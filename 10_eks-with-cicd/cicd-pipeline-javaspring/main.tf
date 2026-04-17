@@ -131,6 +131,20 @@ resource "aws_iam_policy" "this" {
       ]
     },
     {
+      "Sid"   : "CodeCommitAppsRepo",
+      "Effect": "Allow",
+      "Action": [
+        "codecommit:GetBranch",
+        "codecommit:GetCommit",
+        "codecommit:GetRepository",
+        "codecommit:GitPull",
+        "codecommit:GitPush"
+      ],
+      "Resource": [
+        "${aws_codecommit_repository.javaspring_apps.arn}"
+      ]
+    },
+    {
       "Sid"   : "ECRGetToken",
       "Effect": "Allow",
       "Action": [
@@ -231,6 +245,12 @@ resource "aws_codebuild_project" "this_ci" {
     environment_variable {
       name  = "AWS_DEFAULT_REGION"
       value = var.aws_region
+    }
+
+    # K8s 매니페스트 레포 URL — post_build에서 이미지 태그 자동 업데이트에 사용
+    environment_variable {
+      name  = "APPS_REPO_URL"
+      value = aws_codecommit_repository.javaspring_apps.clone_url_http
     }
   }
 
