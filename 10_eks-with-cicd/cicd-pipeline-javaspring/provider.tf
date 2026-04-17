@@ -22,6 +22,10 @@ terraform {
       source  = "alekc/kubectl"
       version = ">= 2.0" # ArgoCD Application CRD 배포용 (plan 단계 클러스터 연결 불필요)
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.0" # S3 버킷 이름 유니크 suffix 생성용
+    }
   }
 }
 

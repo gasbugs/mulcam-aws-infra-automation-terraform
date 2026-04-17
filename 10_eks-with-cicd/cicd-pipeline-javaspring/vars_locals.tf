@@ -9,15 +9,18 @@ variable "aws_region" {
 }
 
 ### locals
-resource "time_static" "this" {
-  # 이 tf 파일에서 생성되는 리소스들의 이름 suffix로 사용 (재배포 시 이름 충돌 방지)
+# S3 버킷 이름은 전역 유니크해야 하므로 랜덤 문자열로 suffix 생성
+resource "random_string" "bucket_suffix" {
+  length  = 8
+  upper   = false
+  special = false
 }
 
 locals {
-  # 파이프라인에 사용할 이름 구성
+  # 파이프라인에 사용할 이름 구성 (S3 버킷 이름 충돌 방지를 위해 랜덤 suffix 사용)
   subject     = "javaspring-pipeline"
-  time_static = formatdate("YYYYMMDDHHmm", time_static.this.rfc3339)
-  name        = join("-", [local.subject, local.time_static])
+  time_static = random_string.bucket_suffix.result # 기존 time_static 참조 호환용 alias
+  name        = join("-", [local.subject, random_string.bucket_suffix.result])
 
   # 태그 구성
   tags = {
