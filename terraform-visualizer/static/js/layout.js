@@ -278,9 +278,11 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
       cicdH = cicdPipeH + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
     } else {
       // Flat list (no pipeline or pipeline is the only item)
-      const leafCount = cicdLeafs.length || 1;
+      const flatItems = cicdLeafs.length ? cicdLeafs : cicdItemsAll;
+      const totalItemH = flatItems.reduce((sum, r) => sum + _nodeHeight(r), 0) || L.NODE_H;
+      const gapsH = Math.max(0, flatItems.length - 1) * L.NODE_GAP_Y;
       cicdW = L.NODE_W + L.SIDE_PAD * 2;
-      cicdH = leafCount * L.NODE_H + (leafCount - 1) * L.NODE_GAP_Y + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
+      cicdH = totalItemH + gapsH + L.SIDE_PAD * 2 + L.EXTERNAL_HEADER;
     }
   }
 
@@ -447,7 +449,7 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
   if (cicdItemsAll.length) {
     if (cicdPipeline && cicdChildren.length > 0) {
       // Children go inside the CodePipeline container box
-      const { cols } = _gridSize(cicdChildren);
+      const { cols, rowH: cicdRowH } = _gridSize(cicdChildren);
       const pipeAbsX = cicdX + L.SIDE_PAD;
       const pipeAbsY = cicdY + L.EXTERNAL_HEADER + L.SIDE_PAD;
       const childStartX = pipeAbsX + L.ZONE_PAD_X;
@@ -457,9 +459,9 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
         const col = i % cols;
         const row = Math.floor(i / cols);
         item.x = childStartX + col * (L.NODE_W + L.NODE_GAP_X);
-        item.y = childStartY + row * (L.NODE_H + L.NODE_GAP_Y);
+        item.y = childStartY + row * ((cicdRowH || L.NODE_H) + L.NODE_GAP_Y);
         item.width = L.NODE_W;
-        item.height = L.NODE_H;
+        item.height = _nodeHeight(item);
         allNodes.push(item);
         nodeMap[item.id] = item;
       });
@@ -475,11 +477,13 @@ function computeLayout(data, showDetails = false, expandedNodeIds = new Set()) {
       // Flat list (pipeline only, or no pipeline)
       const items = cicdLeafs.length ? cicdLeafs : cicdItemsAll;
       const nodeX = cicdX + L.SIDE_PAD;
-      items.forEach((item, i) => {
+      let flatY = cicdY + L.EXTERNAL_HEADER + L.SIDE_PAD;
+      items.forEach((item) => {
         item.x = nodeX;
-        item.y = cicdY + L.EXTERNAL_HEADER + L.SIDE_PAD + i * (L.NODE_H + L.NODE_GAP_Y);
+        item.y = flatY;
         item.width = L.NODE_W;
-        item.height = L.NODE_H;
+        item.height = _nodeHeight(item);
+        flatY += item.height + L.NODE_GAP_Y;
         allNodes.push(item);
         nodeMap[item.id] = item;
       });

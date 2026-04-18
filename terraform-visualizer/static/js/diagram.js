@@ -406,19 +406,9 @@ function renderDiagram(data, showDetails = false) {
         .text(`x${node.count}`);
     }
 
-    // for_each badge
-    if (node.for_each) {
-      const badge = g.append('g').attr('transform', `translate(${node.width - 24}, 4)`);
-      badge.append('rect')
-        .attr('width', 20).attr('height', 14).attr('rx', 3)
-        .attr('fill', node.color || '#666');
-      badge.append('text')
-        .attr('class', 'node-count-badge')
-        .attr('x', 10).attr('y', 11)
-        .attr('text-anchor', 'middle')
-        .attr('font-size', 8)
-        .text('N');
-    }
+    // for_each badge — rendered AFTER expand badge so we can position below it
+    // (actual rendering deferred; placeholder computed here for position reference)
+    const _hasExpandBadge = !showDetails && hiddenNeighborSets[node.id]?.size > 0 && !isDetail;
 
     // Security Group badges — rendered inside the node card (extended area)
     if (node.attached_sgs && node.attached_sgs.length > 0) {
@@ -551,6 +541,26 @@ function renderDiagram(data, showDetails = false) {
         .attr('font-weight', '700')
         .attr('fill', '#fff')
         .text(isExpanded ? '−' : `+${hiddenNbrs.size}`);
+    }
+
+    // for_each badge — below expand badge if present, otherwise at top-right
+    if (node.for_each) {
+      const expandR = 12;
+      const expandOffset = _hasExpandBadge ? (expandR * 2 + 8 + 4) : 4;
+      const bw = 22, bh = 14;
+      const bx = node.width - bw - 4;
+      const by = expandOffset;
+      const feBadge = g.append('g').attr('transform', `translate(${bx}, ${by})`);
+      feBadge.append('rect')
+        .attr('width', bw).attr('height', bh).attr('rx', 3)
+        .attr('fill', node.color || '#666')
+        .attr('opacity', 0.85);
+      feBadge.append('text')
+        .attr('class', 'node-count-badge')
+        .attr('x', bw / 2).attr('y', bh - 3)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', 8)
+        .text('×N');
     }
   });
 
