@@ -7,12 +7,28 @@ Terraform 워크샵 운영에 필요한 계정 관리, 리소스 감사, 비용 
 
 ## 설치
 
+### 권장: pipx (격리된 venv + 전역 커맨드)
+
+```bash
+# pipx가 없으면 먼저 설치
+brew install pipx && pipx ensurepath
+
+# awsw 설치
+cd workshop-management
+pipx install .
+```
+
+`pipx`는 독립된 가상환경에 패키지를 설치하면서도 `awsw` 커맨드를 전역 PATH에 등록해 줍니다.
+시스템 Python을 오염시키지 않으므로 권장하는 방식입니다.
+
+> 코드를 수정한 뒤 반영하려면 `pipx install . --force`로 재설치하세요.
+
+### 대안: pip
+
 ```bash
 cd workshop-management
 pip install .
 ```
-
-설치 후 어디서든 `awsw` 커맨드로 실행할 수 있습니다.
 
 > PATH에 없다는 경고가 뜨면 아래를 `~/.zshrc`에 추가하세요.
 > ```bash
