@@ -7,7 +7,7 @@ After=network-online.target
 [Service]
 User=ec2-user
 WorkingDirectory=/home/ec2-user/app
-ExecStart=/usr/bin/java -jar /home/ec2-user/app/demo-0.0.1-SNAPSHOT.jar
+ExecStart=/usr/bin/java -jar /home/ec2-user/app/demo-0.0.1-SNAPSHOT.jar --server.port=8080
 # Java 앱은 SIGTERM 신호 수신 시 143 코드로 종료 — 정상 종료로 처리
 SuccessExitStatus=143
 TimeoutStopSec=10

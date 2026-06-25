@@ -133,7 +133,7 @@ After=network-online.target
 [Service]
 User=ec2-user
 WorkingDirectory=/home/ec2-user/app
-ExecStart=/usr/bin/java -jar /home/ec2-user/app/demo-0.0.1-SNAPSHOT.jar
+ExecStart=/usr/bin/java -jar /home/ec2-user/app/demo-0.0.1-SNAPSHOT.jar --server.port=${var.application_port}
 SuccessExitStatus=143
 TimeoutStopSec=10
 Restart=on-failure

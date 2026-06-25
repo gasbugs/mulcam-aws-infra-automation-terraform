@@ -7,6 +7,7 @@
 #   - aws_profile: 사용할 AWS CLI 프로파일 이름 (기본값: my-profile)
 #   - environment: 리소스 이름 접두사 — dev/prod 환경을 구분 (기본값: dev)
 #   - ami_name_prefix: 생성될 AMI 이름의 앞부분 (기본값: spring-boot-app-ami)
+#   - application_port: Spring Boot 앱이 일반 사용자 권한으로 바인딩할 포트
 #   - recipe_version: Image Recipe 버전 — 컴포넌트 변경 시 반드시 올려야 함
 #   - codecommit_repo_name: 생성할 CodeCommit 저장소 이름
 ##############################################################################
@@ -36,10 +37,16 @@ variable "ami_name_prefix" {
   default     = "spring-boot-app-ami"
 }
 
+variable "application_port" {
+  description = "Spring Boot 앱이 ec2-user 권한으로 실행될 때 사용할 HTTP 포트"
+  type        = number
+  default     = 8080
+}
+
 variable "recipe_version" {
   description = "Image Recipe 버전 — 컴포넌트를 수정할 때마다 올려야 함 (시맨틱 버전)"
   type        = string
-  default     = "1.0.3"
+  default     = "1.0.4"
 }
 
 variable "codecommit_repo_name" {
